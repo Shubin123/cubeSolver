@@ -23,10 +23,6 @@ const COLORS = {
   BLACK: 0x777777, // Light gray (normalized, not pure black)
 };
 
-// define these intensity changed in the extraBloom callback
-const directionalLight = new THREE.DirectionalLight(0xfffc9c, 1.8);
-const directionalLight2 = new THREE.DirectionalLight(0xfffc9c, 1.8);
-
 // const COLORS = {
 //   WHITE: 0xffffff, // Pure white
 //   RED: 0xff6666, // Lighter red (same as before)
@@ -62,7 +58,6 @@ let selectedCubie = null;
 let dragStartPoint = null;
 let lastClickedFace = -1;
 
-
 // UI Components
 let moveHistory = [];
 let solveButton;
@@ -92,13 +87,14 @@ function init() {
   setupRenderer();
 
   // Set up lighting
-  setupLights();
+  let directionalLights = setupLights();
+  
 
   // Create Rubik's Cube
   createRubiksCube();
 
   // Set up UI
-  setupUI();
+  setupUI(directionalLights[0],directionalLights[1]);
 
   // Set up raycaster for mouse interaction
   raycaster = new THREE.Raycaster();
@@ -118,7 +114,7 @@ function setupCamera() {
 }
 
 function setupRenderer() {
-  let pixelFactor = 3; // originally 6
+  let pixelFactor = 2; // originally 6
   let screenResolution = new Vector2(window.innerWidth, window.innerHeight);
   let renderResolution = screenResolution.clone().divideScalar(pixelFactor);
   renderResolution.x |= 0;
@@ -137,7 +133,7 @@ function setupRenderer() {
 
   // Post-processing
   composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPixelatedPass(2, scene, camera));
+  composer.addPass(new RenderPixelatedPass(pixelFactor, scene, camera));
   bloomPass = new UnrealBloomPass(screenResolution, 0.2, 0.1, 0.5);
   composer.addPass(bloomPass);
 
@@ -149,6 +145,11 @@ function setupLights() {
   scene.add(new THREE.AmbientLight(0x2d3645, 3.5));
 
   // Directional light for shadows
+  // define these intensity changed in the extraBloom callback
+  const directionalLight = new THREE.DirectionalLight(0xfffc9c);
+  const directionalLight2 = new THREE.DirectionalLight(0xfffc9c);
+  directionalLight.intensity = 1.8;
+  directionalLight2.intensity = 1.8;
 
   directionalLight.position.set(5, 5, 5);
   directionalLight2.position.set(-5, -5, -5);
@@ -174,6 +175,7 @@ function setupLights() {
   const target = spotLight.target;
   scene.add(target);
   target.position.set(0, 0, 0);
+  return [directionalLight, directionalLight2];
 }
 
 function createFaceMaterial(color) {
@@ -184,7 +186,7 @@ function createFaceMaterial(color) {
   });
 }
 
-function setupUI() {
+function setupUI(dl1,dl2) {
   const uiContainer = document.createElement("div");
   uiContainer.style.position = "absolute";
   uiContainer.style.top = "10px";
@@ -227,7 +229,7 @@ function setupUI() {
   extraBloomButton.style.marginLeft = "5px";
   extraBloomButton.style.padding = "5px 10px";
   extraBloomButton.addEventListener("click", () => {
-    extraBloomCallback(extraBloomButton, directionalLight, directionalLight2);
+    extraBloomCallback(dl1, dl2);
   });
   uiContainer.appendChild(extraBloomButton);
 
@@ -235,7 +237,11 @@ function setupUI() {
   rotateButton.textContent = "Rotate";
   rotateButton.style.marginLeft = "5px";
   rotateButton.style.padding = "5px 10px";
-  rotateButton.addEventListener("click", ()=>{if(isRotating != null){isRotating = !isRotating}});
+  rotateButton.addEventListener("click", () => {
+    if (isRotating != null) {
+      isRotating = !isRotating;
+    }
+  });
   uiContainer.appendChild(rotateButton);
 
   // Move history section
@@ -264,18 +270,11 @@ function setupUI() {
     `;
   uiContainer.appendChild(controls);
 }
-function extraBloomCallback(
-  directionalLight,
-  directionalLight2
-) {
-  console.log(directionalLight.intensity);
-  
-  directionalLight.intensity  = isBloom ? 5.6 : 1.8;
-  directionalLight2.intensity = isBloom ? 5.6 : 1.8;
+function extraBloomCallback(directionalLight,directionalLight2) {
   isBloom = !isBloom;
+  directionalLight.intensity = isBloom ? 5.6 : 1.8;
+  directionalLight2.intensity = isBloom ? 5.6 : 1.8;
   composer.reset();
-  
-  
 }
 // Mouse interaction handlers
 function onPointerDown(event) {
@@ -302,7 +301,7 @@ function onPointerDown(event) {
   const intersects = raycaster.intersectObjects(allCubies, false);
 
   if (intersects.length > 0) {
-    controls.enabled=false;
+    controls.enabled = false;
     // Get the first intersected cubie
     selectedCubie = intersects[0].object;
 
@@ -317,7 +316,7 @@ function onPointerDown(event) {
 
     if (faceIndex !== -1) {
       lastClickedFace = faceIndex;
-      
+
       updateBloomHighlight();
     }
   }
@@ -464,7 +463,7 @@ function onPointerMove(event) {
 
 function onPointerUp() {
   // Re-enable orbit controls
-    controls.enabled = true;
+  controls.enabled = true;
 
   // Reset drag state
   selectedCubie = null;
@@ -642,7 +641,7 @@ function moveLightToFaceNormal(layerIndex, tempLayer) {
 
   // Point the light toward the center of the cube
   spotLight.target.position.set(0, 0, 0);
-  console.log(spotLight.position);
+  // console.log(spotLight.position);
 }
 // Optional: Add a smooth transition for the light movement
 function animateLightToPosition(light, targetPosition, duration = 300) {
@@ -873,7 +872,6 @@ function solveCube() {
   isSolving = true;
   solveButton.disabled = true;
   scrambleButton.disabled = true;
-  extraBloomButton.disabled = true;
 
   // Reverse all moves
   const reverseMoves = moveHistory
