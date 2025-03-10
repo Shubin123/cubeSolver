@@ -142,7 +142,7 @@ function setupRenderer() {
 
 function setupLights() {
   // Ambient light
-  scene.add(new THREE.AmbientLight(0x2d3645, 10.5));
+  scene.add(new THREE.AmbientLight(0x2d3645, 3.5));
 
   // Directional light for shadows
 
@@ -163,7 +163,7 @@ function setupLights() {
     0.02,
     2
   );
-  spotLight.position.set(2, 2, 2);
+  spotLight.position.set(0, 0, 0);
   spotLight.castShadow = true;
   scene.add(spotLight);
 
@@ -457,49 +457,8 @@ function onMouseUp() {
 }
 
 function updateBloomHighlight() {
-  // Adjust bloom parameters based on last clicked face
-  if (extraBloomButton.disabled) return;
-  if (lastClickedFace === -1) {
-    // Default bloom settings
-    bloomPass.strength = 1;
-    bloomPass.radius = 0.1;
-    bloomPass.threshold = 0.9;
-    return;
-  }
-
-  // Customize bloom based on face color
-  switch (lastClickedFace) {
-    case 0: // Right face (Red)
-      bloomPass.strength = 0.6;
-      bloomPass.radius = 0.2;
-      bloomPass.threshold = 0.7;
-      break;
-    case 1: // Left face (Orange)
-      bloomPass.strength = 0.5;
-      bloomPass.radius = 0.15;
-      bloomPass.threshold = 0.8;
-      break;
-    case 2: // Top face (White)
-      bloomPass.strength = 0.4;
-      bloomPass.radius = 0.1;
-      bloomPass.threshold = 0.9;
-      break;
-    case 3: // Bottom face (Yellow)
-      bloomPass.strength = 0.5;
-      bloomPass.radius = 0.12;
-      bloomPass.threshold = 0.8;
-      break;
-    case 4: // Front face (Blue)
-      bloomPass.strength = 0.7;
-      bloomPass.radius = 0.2;
-      bloomPass.threshold = 0.7;
-      break;
-    case 5: // Back face (Green)
-      bloomPass.strength = 0.6;
-      bloomPass.radius = 0.15;
-      bloomPass.threshold = 0.75;
-      break;
-  }
+  // dont need to update for now but it's still a potentially usefully callback location
+  return;
 }
 
 function createRubiksCube() {
@@ -641,19 +600,19 @@ function moveLightToFaceNormal(layerIndex, tempLayer) {
 
   // Map layer index to cube face normal
   let normal = new THREE.Vector3();
-
+  let lightDist = 100;
   // Determine which face is being rotated and its normal
-  if (layerIndex === 0) normal.set(-1, 0, 0);
+  if (layerIndex === 0) normal.set(-lightDist, 0, 0);
   // Left face
-  else if (layerIndex === 2) normal.set(1, 0, 0);
+  else if (layerIndex === 2) normal.set(lightDist, 0, 0);
   // Right face
-  else if (layerIndex === 3) normal.set(0, -1, 0);
+  else if (layerIndex === 3) normal.set(0, -lightDist, 0);
   // Down face
-  else if (layerIndex === 5) normal.set(0, 1, 0);
+  else if (layerIndex === 5) normal.set(0, lightDist, 0);
   // Up face
-  else if (layerIndex === 6) normal.set(0, 0, -1);
+  else if (layerIndex === 6) normal.set(0, 0, -lightDist);
   // Back face
-  else if (layerIndex === 8) normal.set(0, 0, 1);
+  else if (layerIndex === 8) normal.set(0, 0, lightDist);
   // Front face
   // Middle layers don't have a specific face normal, so we won't move the light
   else return;
@@ -663,8 +622,8 @@ function moveLightToFaceNormal(layerIndex, tempLayer) {
   const lightPosition = normal.clone().multiplyScalar(distance);
 
   // Position the light
-  spotLight.position.copy(lightPosition);
-  // animateLightToPosition(spotLight, lightPosition);
+  // spotLight.position.copy(lightPosition);
+  animateLightToPosition(spotLight, lightPosition);
 
   // Point the light toward the center of the cube
   spotLight.target.position.set(0, 0, 0);
@@ -989,8 +948,8 @@ function animate() {
 
   // Add subtle rotation to the entire cube for display
   if (!isAnimating && !isSolving) {
-    cubeGroup.rotation.y += 0.002;
-    cubeGroup.rotation.x += 0.001;
+    // cubeGroup.rotation.y += 0.002;
+    // cubeGroup.rotation.x += 0.001;
   }
 
   // Render scene
