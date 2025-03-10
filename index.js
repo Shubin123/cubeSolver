@@ -102,9 +102,9 @@ function init() {
 
   // Add event listeners
   window.addEventListener("resize", onWindowResize);
-  window.addEventListener("mousedown", onMouseDown);
-  window.addEventListener("mousemove", onMouseMove);
-  window.addEventListener("mouseup", onMouseUp);
+  window.addEventListener("pointerdown", onPointerDown);
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
 }
 
 function setupCamera() {
@@ -265,7 +265,8 @@ function extraBloomCallback(
   composer.reset();
 }
 // Mouse interaction handlers
-function onMouseDown(event) {
+function onPointerDown(event) {
+  console.log("md");
   if (isAnimating || isSolving) return;
 
   // Disable orbit controls temporarily to allow for dragging
@@ -308,7 +309,7 @@ function onMouseDown(event) {
   }
 }
 
-function onMouseMove(event) {
+function onPointerMove(event) {
   if (!selectedCubie || !dragStartPoint || isAnimating || isSolving) return;
 
   // Calculate current mouse position
@@ -447,7 +448,7 @@ function onMouseMove(event) {
   }
 }
 
-function onMouseUp() {
+function onPointerUp() {
   // Re-enable orbit controls
   //   controls.enabled = true;
 
