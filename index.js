@@ -52,6 +52,8 @@ let cubeGroup; // Holds the entire Rubik's cube
 let layers = []; // Groups for each rotatable layer
 let isSolving = false;
 let isAnimating = false;
+let isRotating = false;
+let isBloom = false;
 
 // Raycasting for mouse interaction
 let raycaster;
@@ -60,12 +62,14 @@ let selectedCubie = null;
 let dragStartPoint = null;
 let lastClickedFace = -1;
 
+
 // UI Components
 let moveHistory = [];
 let solveButton;
 let scrambleButton;
 let extraBloomButton;
 let resetButton;
+let rotateButton;
 let historyDiv;
 
 // Object pooling for better performance
@@ -157,7 +161,7 @@ function setupLights() {
   // Spot light for highlights
   const spotLight = new THREE.SpotLight(
     0xff8800,
-    0.2,
+    0.8,
     10,
     Math.PI / 16,
     0.02,
@@ -165,7 +169,7 @@ function setupLights() {
   );
   spotLight.position.set(0, 0, 0);
   spotLight.castShadow = true;
-  scene.add(spotLight);
+  // scene.add(spotLight);
 
   const target = spotLight.target;
   scene.add(target);
@@ -219,13 +223,20 @@ function setupUI() {
   uiContainer.appendChild(resetButton);
 
   extraBloomButton = document.createElement("button");
-  extraBloomButton.textContent = "extra bloom";
+  extraBloomButton.textContent = "TOOMUCH bloom";
   extraBloomButton.style.marginLeft = "5px";
   extraBloomButton.style.padding = "5px 10px";
   extraBloomButton.addEventListener("click", () => {
     extraBloomCallback(extraBloomButton, directionalLight, directionalLight2);
   });
   uiContainer.appendChild(extraBloomButton);
+
+  rotateButton = document.createElement("button");
+  rotateButton.textContent = "Rotate";
+  rotateButton.style.marginLeft = "5px";
+  rotateButton.style.padding = "5px 10px";
+  rotateButton.addEventListener("click", ()=>{if(isRotating != null){isRotating = !isRotating}});
+  uiContainer.appendChild(rotateButton);
 
   // Move history section
   const historyTitle = document.createElement("h3");
@@ -249,24 +260,25 @@ function setupUI() {
   controls.innerHTML = `
         <p>Click and drag on a face to rotate it</p>
         <p>Use mouse wheel or pinch to zoom</p>
-        <p>Right-click and drag to orbit the view</p>
+        <p>shift-click and pan the view</p>
     `;
   uiContainer.appendChild(controls);
 }
 function extraBloomCallback(
-  extraBloomButton,
   directionalLight,
   directionalLight2
 ) {
-  extraBloomButton.disabled = !extraBloomButton.disabled;
-
-  directionalLight.intensity = 5.6;
-  directionalLight2.intensity = 5.6;
+  console.log(directionalLight.intensity);
+  
+  directionalLight.intensity  = isBloom ? 5.6 : 1.8;
+  directionalLight2.intensity = isBloom ? 5.6 : 1.8;
+  isBloom = !isBloom;
   composer.reset();
+  
+  
 }
 // Mouse interaction handlers
 function onPointerDown(event) {
-  console.log("md");
   if (isAnimating || isSolving) return;
 
   // Disable orbit controls temporarily to allow for dragging
@@ -290,6 +302,7 @@ function onPointerDown(event) {
   const intersects = raycaster.intersectObjects(allCubies, false);
 
   if (intersects.length > 0) {
+    controls.enabled=false;
     // Get the first intersected cubie
     selectedCubie = intersects[0].object;
 
@@ -304,6 +317,7 @@ function onPointerDown(event) {
 
     if (faceIndex !== -1) {
       lastClickedFace = faceIndex;
+      
       updateBloomHighlight();
     }
   }
@@ -450,7 +464,7 @@ function onPointerMove(event) {
 
 function onPointerUp() {
   // Re-enable orbit controls
-  //   controls.enabled = true;
+    controls.enabled = true;
 
   // Reset drag state
   selectedCubie = null;
@@ -948,9 +962,9 @@ function animate() {
   controls.update();
 
   // Add subtle rotation to the entire cube for display
-  if (!isAnimating && !isSolving) {
-    // cubeGroup.rotation.y += 0.002;
-    // cubeGroup.rotation.x += 0.001;
+  if (!isAnimating && !isSolving && isRotating) {
+    cubeGroup.rotation.y = Math.sin(0.02);
+    cubeGroup.rotation.x = Math.sin(-0.01);
   }
 
   // Render scene
