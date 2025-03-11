@@ -429,7 +429,200 @@ function rotateLayer(layerIndex, direction, proportionalAngle = null) {
     activeTempLayer.setRotationFromAxisAngle(activeRotationAxis, accumulatedRotation);
   }
 }
-// Updated pointer callback for releasing the drag
+
+function onPointerDown(event) {
+  if (isAnimating || isSolving) return;
+
+  // Calculate mouse position
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  
+  // Find all cubies
+  const allCubies = [];
+  cubeGroup.traverse((object) => {
+    if (object instanceof THREE.Mesh && object.userData.isCubie) {
+      allCubies.push(object);
+    }
+  });
+
+  const intersects = raycaster.intersectObjects(allCubies, false);
+
+  if (intersects.length > 0) {
+    controls.enabled = false;
+    selectedCubie = intersects[0].object;
+    dragStartPoint = intersects[0].point.clone();
+    dragStartPosition = { x: event.clientX, y: event.clientY };
+
+    // Get the normal of the clicked face in world space
+    const faceNormal = intersects[0].face.normal.clone();
+    faceNormal.transformDirection(selectedCubie.matrixWorld);
+    
+    // Determine which global face was clicked based on normal
+    const absX = Math.abs(faceNormal.x);
+    const absY = Math.abs(faceNormal.y);
+    const absZ = Math.abs(faceNormal.z);
+    
+    // Find the dominant axis
+    if (absX > absY && absX > absZ) {
+      // X-axis is dominant
+      if (faceNormal.x > 0) {
+        lastClickedFace = "right"; // +X face
+      } else {
+        lastClickedFace = "left";  // -X face
+      }
+    } else if (absY > absX && absY > absZ) {
+      // Y-axis is dominant
+      if (faceNormal.y > 0) {
+        lastClickedFace = "top";   // +Y face
+      } else {
+        lastClickedFace = "bottom"; // -Y face
+      }
+    } else {
+      // Z-axis is dominant
+      if (faceNormal.z > 0) {
+        lastClickedFace = "front"; // +Z face
+      } else {
+        lastClickedFace = "back";  // -Z face
+      }
+    }
+
+    isDragging = true;
+    currentRotation = 0;
+    updateBloomHighlight();
+  }
+}
+
+function onPointerMove(event) {
+  if (!selectedCubie || !dragStartPoint || !isDragging || isAnimating || isSolving) return;
+
+  // Calculate current mouse position
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  // Calculate drag distance
+  const dragDeltaX = event.clientX - dragStartPosition.x;
+  const dragDeltaY = event.clientY - dragStartPosition.y;
+
+  // Get the current mouse position in 3D space
+  raycaster.setFromCamera(mouse, camera);
+  const cameraNormal = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  const dragPlane = new THREE.Plane(cameraNormal, -dragStartPoint.dot(cameraNormal));
+  const dragCurrentPoint = new THREE.Vector3();
+  raycaster.ray.intersectPlane(dragPlane, dragCurrentPoint);
+
+  if (dragCurrentPoint) {
+    // Calculate the drag vector
+    const dragVector = dragCurrentPoint.clone().sub(dragStartPoint);
+    
+    // Skip if the drag is too small
+    if (dragVector.length() < 0.05) return;
+
+    // World direction vectors
+    const worldX = new THREE.Vector3(1, 0, 0);
+    const worldY = new THREE.Vector3(0, 1, 0);
+    const worldZ = new THREE.Vector3(0, 0, 1);
+
+    // Calculate layer and direction based on which face was clicked
+    layerIndex = -1;
+    let direction = 1;
+    
+    // Calculate proportional rotation amount
+    const sensitivity = 0.01;
+    let rotationAmount = Math.sqrt(dragDeltaX * dragDeltaX + dragDeltaY * dragDeltaY) * sensitivity;
+
+    switch (lastClickedFace) {
+      case "right": // +X face
+        if (Math.abs(dragVector.dot(worldY)) > Math.abs(dragVector.dot(worldZ))) {
+          // Vertical drag
+          layerIndex = 2; // Right layer
+          direction = dragVector.dot(worldY) > 0 ? 1 : -1;
+        } else {
+          // Horizontal drag
+          layerIndex = 2; // Right layer
+          direction = dragVector.dot(worldZ) > 0 ? -1 : 1;
+        }
+        break;
+        
+      case "left": // -X face
+        if (Math.abs(dragVector.dot(worldY)) > Math.abs(dragVector.dot(worldZ))) {
+          // Vertical drag
+          layerIndex = 0; // Left layer
+          direction = dragVector.dot(worldY) > 0 ? 1 : -1;
+        } else {
+          // Horizontal drag
+          layerIndex = 0; // Left layer
+          direction = dragVector.dot(worldZ) > 0 ? 1 : -1;
+        }
+        break;
+        
+      case "top": // +Y face
+        if (Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldZ))) {
+          // Horizontal X drag
+          layerIndex = 5; // Up layer
+          direction = dragVector.dot(worldX) > 0 ? 1 : -1;
+        } else {
+          // Horizontal Z drag
+          layerIndex = 5; // Up layer
+          direction = dragVector.dot(worldZ) > 0 ? -1 : 1;
+        }
+        break;
+        
+      case "bottom": // -Y face
+        if (Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldZ))) {
+          // Horizontal X drag
+          layerIndex = 3; // Down layer
+          direction = dragVector.dot(worldX) > 0 ? -1 : 1;
+        } else {
+          // Horizontal Z drag
+          layerIndex = 3; // Down layer
+          direction = dragVector.dot(worldZ) > 0 ? 1 : -1;
+        }
+        break;
+        
+      case "front": // +Z face
+        if (Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldY))) {
+          // Horizontal drag
+          layerIndex = 8; // Front layer
+          direction = dragVector.dot(worldX) > 0 ? 1 : -1;
+        } else {
+          // Vertical drag
+          layerIndex = 8; // Front layer
+          direction = dragVector.dot(worldY) > 0 ? -1 : 1;
+        }
+        break;
+        
+      case "back": // -Z face
+        if (Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldY))) {
+          // Horizontal drag
+          layerIndex = 6; // Back layer
+          direction = dragVector.dot(worldX) > 0 ? -1 : 1;
+        } else {
+          // Vertical drag
+          layerIndex = 6; // Back layer
+          direction = dragVector.dot(worldY) > 0 ? -1 : 1;
+        }
+        break;
+    }
+
+    if (layerIndex !== -1) {
+      // Store the current layer for snap calculations in onPointerUp
+      currentLayer = layerIndex;
+
+      // Calculate the rotation amount
+      const newRotation = rotationAmount;
+      const rotationDelta = newRotation - currentRotation;
+
+      // Update the current rotation
+      currentRotation = newRotation;
+
+      // Perform the proportional rotation
+      rotateLayer(layerIndex, direction, rotationDelta);
+    }
+  }
+}
+
 function onPointerUp() {
   // Only proceed if we're in drag mode
   if (dragActive && activeTempLayer !== null) {
@@ -469,7 +662,6 @@ function onPointerUp() {
           // Reset drag state
           dragActive = false;
           activeTempLayer = null;
-          // layerIndex = -1;
           activeRotationAxis = null;
           accumulatedRotation = 0;
           isAnimating = false;
@@ -477,8 +669,6 @@ function onPointerUp() {
           // Add the move to history
           const layerNames = ["L", "M", "R", "D", "E", "U", "B", "S", "F"];
           const direction = quarterTurns > 0 ? "" : "'";
-          // const moveName = layerNames[layerIndex] + (direction < 0 ? "'" : "");
-          console.log(layerIndex);
           const moveName = layerNames[layerIndex] + direction;
           moveHistory.push(moveName);
           console.log(moveName);
@@ -542,220 +732,7 @@ function onPointerUp() {
   // Reset pointer state
   selectedCubie = null;
   dragStartPoint = null;
-}
-
-function onPointerDown(event) {
-  if (isAnimating || isSolving) return;
-
-  // Disable orbit controls temporarily to allow for dragging
-  //   controls.enabled = false
-
-  // Calculate mouse position in normalized device coordinates (-1 to +1)
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-  // Cast a ray from the camera to the mouse position
-  raycaster.setFromCamera(mouse, camera);
-
-  // Find all intersected objects from all cubies
-  const allCubies = [];
-  cubeGroup.traverse((object) => {
-    if (object instanceof THREE.Mesh && object.userData.isCubie) {
-      allCubies.push(object);
-    }
-  });
-
-  const intersects = raycaster.intersectObjects(allCubies, false);
-
-  if (intersects.length > 0) {
-    controls.enabled = false;
-    // Get the first intersected cubie
-    selectedCubie = intersects[0].object;
-
-    // Store the point of intersection for dragging calculations
-    dragStartPoint = intersects[0].point.clone();
-
-    // Store the initial position for proportional dragging
-    dragStartPosition = { x: event.clientX, y: event.clientY };
-
-    // Get the face index that was clicked
-    const faceIndex =
-      intersects[0].faceIndex !== undefined
-        ? Math.floor(intersects[0].faceIndex / 2)
-        : -1;
-
-    if (faceIndex !== -1) {
-      lastClickedFace = faceIndex;
-      isDragging = true;
-      currentRotation = 0;
-
-      updateBloomHighlight();
-    }
-  }
-}
-
-function onPointerMove(event) {
-  if (
-    !selectedCubie ||
-    !dragStartPoint ||
-    !isDragging ||
-    isAnimating ||
-    isSolving
-  )
-    return;
-
-  // Calculate current mouse position for normalized coordinates
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-  // Calculate drag distance in pixels
-  const dragDeltaX = event.clientX - dragStartPosition.x;
-  const dragDeltaY = event.clientY - dragStartPosition.y;
-
-  // Cast a ray from the camera to the mouse position
-  raycaster.setFromCamera(mouse, camera);
-
-  // Calculate a plane perpendicular to the camera at the drag start point
-  const cameraNormal = new THREE.Vector3(0, 0, -1).applyQuaternion(
-    camera.quaternion
-  );
-  const dragPlane = new THREE.Plane(
-    cameraNormal,
-    -dragStartPoint.dot(cameraNormal)
-  );
-
-  // Find where the ray intersects the plane
-  const dragCurrentPoint = new THREE.Vector3();
-  raycaster.ray.intersectPlane(dragPlane, dragCurrentPoint);
-
-  if (dragCurrentPoint) {
-    // Calculate the drag vector
-    const dragVector = dragCurrentPoint.clone().sub(dragStartPoint);
-
-    // Skip if the drag is too small
-    if (dragVector.length() < 0.05) return;
-
-    // Determine which face was clicked based on normal
-    const faceMapping = selectedCubie.userData.faceIndices;
-
-    // Calculate layer and direction based on face and drag direction
-    layerIndex = -1;
-    let direction = 1;
-
-    // Calculate proportional rotation amount based on drag distance
-    // Adjust sensitivity as needed
-    const sensitivity = 0.01;
-    let rotationAmount =
-      Math.sqrt(dragDeltaX * dragDeltaX + dragDeltaY * dragDeltaY) *
-      sensitivity;
-
-    // World direction vectors
-    const worldX = new THREE.Vector3(1, 0, 0);
-    const worldY = new THREE.Vector3(0, 1, 0);
-    const worldZ = new THREE.Vector3(0, 0, 1);
-
-    switch (lastClickedFace) {
-      case faceMapping.right: // +X face
-        if (
-          Math.abs(dragVector.dot(worldY)) > Math.abs(dragVector.dot(worldZ))
-        ) {
-          // Vertical drag
-          layerIndex = 2; // Right layer
-          direction = dragVector.dot(worldY) > 0 ? 1 : -1;
-        } else {
-          // Horizontal drag
-          layerIndex = 2; // Right layer
-          direction = dragVector.dot(worldZ) > 0 ? -1 : 1;
-        }
-        break;
-
-      case faceMapping.left: // -X face
-        if (
-          Math.abs(dragVector.dot(worldY)) > Math.abs(dragVector.dot(worldZ))
-        ) {
-          // Vertical drag
-          layerIndex = 0; // Left layer
-          direction = dragVector.dot(worldY) > 0 ? 1 : -1;
-        } else {
-          // Horizontal drag
-          layerIndex = 0; // Left layer
-          direction = dragVector.dot(worldZ) > 0 ? 1 : -1;
-        }
-        break;
-
-      // ... (other cases remain the same)
-      case faceMapping.top: // +Y face
-        if (
-          Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldZ))
-        ) {
-          // Horizontal X drag
-          layerIndex = 5; // Up layer
-          direction = dragVector.dot(worldX) > 0 ? 1 : -1;
-        } else {
-          // Horizontal Z drag
-          layerIndex = 5; // Up layer
-          direction = dragVector.dot(worldZ) > 0 ? -1 : 1;
-        }
-        break;
-
-      case faceMapping.bottom: // -Y face
-        if (
-          Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldZ))
-        ) {
-          // Horizontal X drag
-          layerIndex = 3; // Down layer
-          direction = dragVector.dot(worldX) > 0 ? -1 : 1;
-        } else {
-          // Horizontal Z drag
-          layerIndex = 3; // Down layer
-          direction = dragVector.dot(worldZ) > 0 ? 1 : -1;
-        }
-        break;
-
-      case faceMapping.front: // +Z face
-        if (
-          Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldY))
-        ) {
-          // Horizontal drag
-          layerIndex = 8; // Front layer
-          direction = dragVector.dot(worldX) > 0 ? 1 : -1;
-        } else {
-          // Vertical drag
-          layerIndex = 8; // Front layer
-          direction = dragVector.dot(worldY) > 0 ? -1 : 1;
-        }
-        break;
-
-      case faceMapping.back: // -Z face
-        if (
-          Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldY))
-        ) {
-          // Horizontal drag
-          layerIndex = 6; // Back layer
-          direction = dragVector.dot(worldX) > 0 ? -1 : 1;
-        } else {
-          // Vertical drag
-          layerIndex = 6; // Back layer
-          direction = dragVector.dot(worldY) > 0 ? -1 : 1;
-        }
-        break;
-    }
-
-    if (layerIndex !== -1) {
-      // Store the current layer for snap calculations in onPointerUp
-      currentLayer = layerIndex;
-
-      // Calculate the rotation amount
-      const newRotation = rotationAmount;
-      const rotationDelta = newRotation - currentRotation;
-
-      // Update the current rotation
-      currentRotation = newRotation;
-
-      // Perform the proportional rotation
-      rotateLayer(layerIndex, direction, rotationDelta);
-    }
-  }
+  isDragging = false;
 }
 
 function updateBloomHighlight() {
