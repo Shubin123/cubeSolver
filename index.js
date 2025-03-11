@@ -16,22 +16,12 @@ const GAP = 0.01; // Gap between cubies
 const COLORS = {
   WHITE: 0xffffff, // Light pastel blue (normalized white)
   RED: 0xff9999, // Light red (normalized)
-  BLUE: 0x99ccff, // Light blue (normalized)
+  BLUE: 0x66666ff, // Light blue (normalized)
   ORANGE: 0xffcc99, // Light orange (normalized)
   GREEN: 0x99ff99, // Light green (normalized)
   YELLOW: 0xffff99, // Light yellow (normalized)
   BLACK: 0x777777, // Light gray (normalized, not pure black)
 };
-
-// const COLORS = {
-//   WHITE: 0xffffff, // Pure white
-//   RED: 0xff6666, // Lighter red (same as before)
-//   BLUE: 0x66aaff, // Lighter blue (same as before)
-//   ORANGE: 0xffcc66, // Lighter orange (same as before)
-//   GREEN: 0x66ff66, // Lighter green
-//   YELLOW: 0xffff66, // Lighter yellow
-//   BLACK: 0x333333, // Lighter black (almost dark gray)
-// };
 
 // Rendering components
 let camera;
@@ -58,6 +48,7 @@ let selectedCubie = null;
 let dragStartPoint = null;
 let lastClickedFace = -1;
 
+
 // UI Components
 let moveHistory = [];
 let solveButton;
@@ -70,7 +61,8 @@ let historyDiv;
 // Object pooling for better performance
 let cubiePool = [];
 let cubiesContainer;
-let t = 0;
+
+let timeSinceStart = 0;
 // Initialize everything
 init();
 animate();
@@ -88,13 +80,12 @@ function init() {
 
   // Set up lighting
   let directionalLights = setupLights();
-  
 
   // Create Rubik's Cube
   createRubiksCube();
 
   // Set up UI
-  setupUI(directionalLights[0],directionalLights[1]);
+  setupUI(directionalLights[0], directionalLights[1]);
 
   // Set up raycaster for mouse interaction
   raycaster = new THREE.Raycaster();
@@ -108,8 +99,11 @@ function init() {
 }
 
 function setupCamera() {
-  const aspectRatio = window.innerWidth / window.innerHeight;
-  camera = new THREE.PerspectiveCamera(45, aspectRatio, 0.1, 1000);
+  let width = window.innerWidth;
+  let height = window.innerHeight;
+  let cameraScale = 800;
+  // camera = new THREE.PerspectiveCamera(45, aspectRatio, 0.1, 1000);
+  camera = new THREE.OrthographicCamera( width / - cameraScale, width / cameraScale, height / cameraScale, height / - cameraScale, 1, 1000 );
   camera.position.set(2, 2, 2);
 }
 
@@ -186,7 +180,7 @@ function createFaceMaterial(color) {
   });
 }
 
-function setupUI(dl1,dl2) {
+function setupUI(dl1, dl2) {
   const uiContainer = document.createElement("div");
   uiContainer.style.position = "absolute";
   uiContainer.style.top = "10px";
@@ -270,13 +264,286 @@ function setupUI(dl1,dl2) {
     `;
   uiContainer.appendChild(controls);
 }
-function extraBloomCallback(directionalLight,directionalLight2) {
+
+function extraBloomCallback(directionalLight, directionalLight2) {
   isBloom = !isBloom;
   directionalLight.intensity = isBloom ? 5.6 : 1.8;
   directionalLight2.intensity = isBloom ? 5.6 : 1.8;
   composer.reset();
 }
-// Mouse interaction handlers
+
+
+
+let currentLayer = -1;
+let currentRotation = 0;
+let dragStartPosition = null;
+let dragActive = false;
+let activeTempLayer = null;
+let layerIndex = -1;
+let activeRotationAxis = null;
+let accumulatedRotation = 0;
+let snapThreshold = Math.PI / 4; // 45 degrees - how close to a quarter turn to snap
+let isDragging = false; 
+
+function rotateLayer(layerIndex, direction, proportionalAngle = null) {
+  // For complete rotations or initial setup
+  if (proportionalAngle === null) {
+    // Clean up any existing drag state
+    if (dragActive && activeTempLayer) {
+      cubeGroup.remove(activeTempLayer);
+      // Return cubies to their original container
+      activeTempLayer.children.slice().forEach((cubie) => {
+        if (cubie.userData.originalParent) {
+          activeTempLayer.remove(cubie);
+          cubie.userData.originalParent.add(cubie);
+        }
+      });
+      
+      dragActive = false;
+      activeTempLayer = null;
+      layerIndex = -1;
+      activeRotationAxis = null;
+      accumulatedRotation = 0;
+    }
+    
+    if (isAnimating) return;
+    isAnimating = true;
+    
+    // Map layer index to move notation
+    const layerNames = ["L", "M", "R", "D", "E", "U", "B", "S", "F"];
+    const moveName = layerNames[layerIndex] + (direction < 0 ? "'" : "");
+    
+    // Add to history
+    moveHistory.push(moveName);
+    
+    updateMoveHistory();
+    
+    // Determine rotation axis
+    let axis = new THREE.Vector3();
+    if (layerIndex < 3) axis.set(1, 0, 0);   // X layers
+    else if (layerIndex < 6) axis.set(0, 1, 0);   // Y layers
+    else axis.set(0, 0, 1); // Z layers
+    
+    // Get cubies for this layer from the reference array
+    const layerCubies = layers[layerIndex].userData.cubieRefs.slice();
+    
+    // Create temporary group for animation
+    const tempLayer = new THREE.Group();
+    cubeGroup.add(tempLayer);
+    
+    // Add all cubies to temporary layer for animation
+    layerCubies.forEach((cubie) => {
+      // Store original parent and position
+      cubie.userData.originalParent = cubie.parent;
+      cubie.userData.originalWorldPosition = new THREE.Vector3();
+      cubie.getWorldPosition(cubie.userData.originalWorldPosition);
+      
+      // Add to temp layer
+      cubie.parent.remove(cubie);
+      tempLayer.add(cubie);
+    });
+    
+    moveLightToFaceNormal(layerIndex, tempLayer);
+    
+    // Animation variables for complete rotation
+    const targetAngle = (direction * Math.PI) / 2;
+    const duration = 500; // ms
+    const startTime = performance.now();
+    
+    function animateRotation() {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Ease function (cubic)
+      const easeProgress = progress < 0.5
+        ? 4 * progress * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+      
+      // Set rotation
+      tempLayer.setRotationFromAxisAngle(axis, targetAngle * easeProgress);
+      
+      if (progress < 1) {
+        requestAnimationFrame(animateRotation);
+      } else {
+        // Complete rotation and update cubie data
+        completeRotation(tempLayer, axis, targetAngle);
+        isAnimating = false;
+      }
+    }
+    
+    animateRotation();
+  } 
+  // For proportional dragging
+  else {
+    // Create or reuse a temporary layer group
+    if (!dragActive) {
+      // Clean up any existing drag state
+      if (dragActive && activeTempLayer) {
+        cubeGroup.remove(activeTempLayer);
+        activeTempLayer.children.slice().forEach((cubie) => {
+          if (cubie.userData.originalParent) {
+            activeTempLayer.remove(cubie);
+            cubie.userData.originalParent.add(cubie);
+          }
+        });
+      }
+      
+      // Determine rotation axis
+      let axis = new THREE.Vector3();
+      if (layerIndex < 3) axis.set(1, 0, 0);   // X layers
+      else if (layerIndex < 6) axis.set(0, 1, 0);   // Y layers
+      else axis.set(0, 0, 1); // Z layers
+      
+      // Get cubies for this layer from the reference array
+      const layerCubies = layers[layerIndex].userData.cubieRefs.slice();
+      
+      // Create temporary group for animation
+      const tempLayer = new THREE.Group();
+      cubeGroup.add(tempLayer);
+      
+      // Add all cubies to temporary layer for animation
+      layerCubies.forEach((cubie) => {
+        // Store original parent and position
+        cubie.userData.originalParent = cubie.parent;
+        cubie.userData.originalWorldPosition = new THREE.Vector3();
+        cubie.getWorldPosition(cubie.userData.originalWorldPosition);
+        
+        // Add to temp layer
+        cubie.parent.remove(cubie);
+        tempLayer.add(cubie);
+      });
+      
+      dragActive = true;
+      activeTempLayer = tempLayer;
+      // activeLayerIndex = layerIndex;
+      activeRotationAxis = axis;
+      accumulatedRotation = 0;
+      
+      moveLightToFaceNormal(layerIndex, tempLayer);
+    }
+    
+    // Update accumulated rotation
+    accumulatedRotation += proportionalAngle * direction;
+    
+    // Apply the rotation directly (no animation)
+    activeTempLayer.setRotationFromAxisAngle(activeRotationAxis, accumulatedRotation);
+  }
+}
+// Updated pointer callback for releasing the drag
+function onPointerUp() {
+  // Only proceed if we're in drag mode
+  if (dragActive && activeTempLayer !== null) {
+    // Determine if we need to snap to a quarter turn
+    const quarterTurns = Math.round(accumulatedRotation / (Math.PI/2));
+    const remainingAngle = (quarterTurns * Math.PI/2) - accumulatedRotation;
+    
+    // Check if we're close enough to a quarter turn to snap
+    if (Math.abs(accumulatedRotation) >= snapThreshold) {
+      // Animate to the nearest quarter turn
+      const startRotation = accumulatedRotation;
+      const targetRotation = quarterTurns * Math.PI/2;
+      const startTime = performance.now();
+      const duration = 200; // ms - short animation for snap
+      
+      isAnimating = true;
+      
+      function snapAnimation() {
+        const elapsed = performance.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Ease out
+        const easeProgress = 1 - Math.pow(1 - progress, 3);
+        
+        // Calculate current angle
+        const currentAngle = startRotation + (targetRotation - startRotation) * easeProgress;
+        
+        // Apply rotation
+        activeTempLayer.setRotationFromAxisAngle(activeRotationAxis, currentAngle);
+        
+        if (progress < 1) {
+          requestAnimationFrame(snapAnimation);
+        } else {
+          // Complete the rotation and update cube state
+          completeRotation(activeTempLayer, activeRotationAxis, targetRotation);
+          
+          // Reset drag state
+          dragActive = false;
+          activeTempLayer = null;
+          // layerIndex = -1;
+          activeRotationAxis = null;
+          accumulatedRotation = 0;
+          isAnimating = false;
+          
+          // Add the move to history
+          const layerNames = ["L", "M", "R", "D", "E", "U", "B", "S", "F"];
+          const direction = quarterTurns > 0 ? "" : "'";
+          // const moveName = layerNames[layerIndex] + (direction < 0 ? "'" : "");
+          console.log(layerIndex);
+          const moveName = layerNames[layerIndex] + direction;
+          moveHistory.push(moveName);
+          console.log(moveName);
+          updateMoveHistory();
+        }
+      }
+      
+      snapAnimation();
+    } else {
+      // If rotation is too small, animate back to starting position
+      const startRotation = accumulatedRotation;
+      const targetRotation = 0;
+      const startTime = performance.now();
+      const duration = 200; // ms - short animation for reset
+      
+      isAnimating = true;
+      
+      function resetAnimation() {
+        const elapsed = performance.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Ease out
+        const easeProgress = 1 - Math.pow(1 - progress, 3);
+        
+        // Calculate current angle
+        const currentAngle = startRotation + (targetRotation - startRotation) * easeProgress;
+        
+        // Apply rotation
+        activeTempLayer.setRotationFromAxisAngle(activeRotationAxis, currentAngle);
+        
+        if (progress < 1) {
+          requestAnimationFrame(resetAnimation);
+        } else {
+          // Return cubies to original positions
+          activeTempLayer.children.slice().forEach((cubie) => {
+            if (cubie.userData.originalParent) {
+              activeTempLayer.remove(cubie);
+              cubie.userData.originalParent.add(cubie);
+            }
+          });
+          
+          cubeGroup.remove(activeTempLayer);
+          
+          // Reset drag state
+          dragActive = false;
+          activeTempLayer = null;
+          layerIndex = -1;
+          activeRotationAxis = null;
+          accumulatedRotation = 0;
+          isAnimating = false;
+        }
+      }
+      
+      resetAnimation();
+    }
+  }
+  
+  // Re-enable orbit controls
+  controls.enabled = true;
+  
+  // Reset pointer state
+  selectedCubie = null;
+  dragStartPoint = null;
+}
+
 function onPointerDown(event) {
   if (isAnimating || isSolving) return;
 
@@ -308,6 +575,9 @@ function onPointerDown(event) {
     // Store the point of intersection for dragging calculations
     dragStartPoint = intersects[0].point.clone();
 
+    // Store the initial position for proportional dragging
+    dragStartPosition = { x: event.clientX, y: event.clientY };
+
     // Get the face index that was clicked
     const faceIndex =
       intersects[0].faceIndex !== undefined
@@ -316,6 +586,8 @@ function onPointerDown(event) {
 
     if (faceIndex !== -1) {
       lastClickedFace = faceIndex;
+      isDragging = true;
+      currentRotation = 0;
 
       updateBloomHighlight();
     }
@@ -323,11 +595,22 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
-  if (!selectedCubie || !dragStartPoint || isAnimating || isSolving) return;
+  if (
+    !selectedCubie ||
+    !dragStartPoint ||
+    !isDragging ||
+    isAnimating ||
+    isSolving
+  )
+    return;
 
-  // Calculate current mouse position
+  // Calculate current mouse position for normalized coordinates
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  // Calculate drag distance in pixels
+  const dragDeltaX = event.clientX - dragStartPosition.x;
+  const dragDeltaY = event.clientY - dragStartPosition.y;
 
   // Cast a ray from the camera to the mouse position
   raycaster.setFromCamera(mouse, camera);
@@ -356,8 +639,15 @@ function onPointerMove(event) {
     const faceMapping = selectedCubie.userData.faceIndices;
 
     // Calculate layer and direction based on face and drag direction
-    let layerIndex = -1;
+    layerIndex = -1;
     let direction = 1;
+
+    // Calculate proportional rotation amount based on drag distance
+    // Adjust sensitivity as needed
+    const sensitivity = 0.01;
+    let rotationAmount =
+      Math.sqrt(dragDeltaX * dragDeltaX + dragDeltaY * dragDeltaY) *
+      sensitivity;
 
     // World direction vectors
     const worldX = new THREE.Vector3(1, 0, 0);
@@ -393,6 +683,7 @@ function onPointerMove(event) {
         }
         break;
 
+      // ... (other cases remain the same)
       case faceMapping.top: // +Y face
         if (
           Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldZ))
@@ -451,23 +742,20 @@ function onPointerMove(event) {
     }
 
     if (layerIndex !== -1) {
-      // Perform the rotation
-      rotateLayer(layerIndex, direction);
+      // Store the current layer for snap calculations in onPointerUp
+      currentLayer = layerIndex;
 
-      // Reset drag state
-      selectedCubie = null;
-      dragStartPoint = null;
+      // Calculate the rotation amount
+      const newRotation = rotationAmount;
+      const rotationDelta = newRotation - currentRotation;
+
+      // Update the current rotation
+      currentRotation = newRotation;
+
+      // Perform the proportional rotation
+      rotateLayer(layerIndex, direction, rotationDelta);
     }
   }
-}
-
-function onPointerUp() {
-  // Re-enable orbit controls
-  controls.enabled = true;
-
-  // Reset drag state
-  selectedCubie = null;
-  dragStartPoint = null;
 }
 
 function updateBloomHighlight() {
@@ -648,96 +936,25 @@ function animateLightToPosition(light, targetPosition, duration = 300) {
   const startPosition = light.position.clone();
   const startTime = performance.now();
 
-  function updateLightPosition() {
-    const elapsed = performance.now() - startTime;
-    const progress = Math.min(elapsed / duration, 1);
+function updateLightPosition() {
+  const elapsed = performance.now() - startTime;
+  const progress = Math.min(elapsed / duration, 1);
 
-    // Use ease-out cubic
-    const easeProgress = 1 - Math.pow(1 - progress, 3);
+  // Use ease-out cubic
+  const easeProgress = 1 - Math.pow(1 - progress, 3);
 
-    // Interpolate position
-    light.position.lerpVectors(startPosition, targetPosition, easeProgress);
+  // Interpolate position
+  light.position.lerpVectors(startPosition, targetPosition, easeProgress);
 
-    if (progress < 1) {
-      requestAnimationFrame(updateLightPosition);
-    }
+  if (progress < 1) {
+    requestAnimationFrame(updateLightPosition);
   }
+}
 
   updateLightPosition();
 }
 
-function rotateLayer(layerIndex, direction) {
-  if (isAnimating) return;
-  isAnimating = true;
-
-  // Map layer index to move notation
-  const layerNames = ["L", "M", "R", "D", "E", "U", "B", "S", "F"];
-  const moveName = layerNames[layerIndex] + (direction < 0 ? "'" : "");
-
-  // Add to history
-  moveHistory.push(moveName);
-  updateMoveHistory();
-
-  // Determine rotation axis
-  let axis = new THREE.Vector3();
-  if (layerIndex < 3) axis.set(1, 0, 0);
-  // X layers
-  else if (layerIndex < 6) axis.set(0, 1, 0);
-  // Y layers
-  else axis.set(0, 0, 1); // Z layers
-
-  // Get cubies for this layer from the reference array
-  const layerCubies = layers[layerIndex].userData.cubieRefs.slice();
-
-  // Create temporary group for animation
-  const tempLayer = new THREE.Group();
-  cubeGroup.add(tempLayer);
-
-  // Add all cubies to temporary layer for animation
-  layerCubies.forEach((cubie) => {
-    // Store original parent and position
-    cubie.userData.originalParent = cubie.parent;
-    cubie.userData.originalWorldPosition = new THREE.Vector3();
-    cubie.getWorldPosition(cubie.userData.originalWorldPosition);
-
-    // Add to temp layer
-    cubie.parent.remove(cubie);
-    tempLayer.add(cubie);
-  });
-
-  moveLightToFaceNormal(layerIndex, tempLayer);
-
-  // Animation variables
-  const targetAngle = (direction * Math.PI) / 2;
-  const duration = 500; // ms
-  const startTime = performance.now();
-
-  function animateRotation() {
-    const elapsed = performance.now() - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-
-    // Ease function (cubic)
-    const easeProgress =
-      progress < 0.5
-        ? 4 * progress * progress * progress
-        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-
-    // Set rotation
-    tempLayer.setRotationFromAxisAngle(axis, targetAngle * easeProgress);
-
-    if (progress < 1) {
-      requestAnimationFrame(animateRotation);
-    } else {
-      // Complete rotation and update cubie data
-      completeRotation(tempLayer, layerIndex, axis, targetAngle);
-      isAnimating = false;
-    }
-  }
-
-  animateRotation();
-}
-
-function completeRotation(tempLayer, layerIndex, axis, angle) {
+function completeRotation(tempLayer, axis, angle) {
   // Get matrix for final rotation
   const rotationMatrix = new THREE.Matrix4().makeRotationAxis(axis, angle);
 
@@ -838,8 +1055,7 @@ function scrambleCube() {
     if (i >= moves) {
       return;
     }
-    const layerIndex =
-      layerIndices[Math.floor(Math.random() * layerIndices.length)];
+    const layerIndex = layerIndices[Math.floor(Math.random() * layerIndices.length)];
     const direction = Math.random() > 0.5 ? 1 : -1;
 
     rotateLayer(layerIndex, direction);
@@ -939,19 +1155,31 @@ function resetCube() {
 }
 
 function onWindowResize() {
-  const aspectRatio = window.innerWidth / window.innerHeight;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const cameraScale=800;
+
+  const aspectRatio = width / height;
 
   camera.aspect = aspectRatio;
   camera.updateProjectionMatrix();
 
-  let screenResolution = new Vector2(window.innerWidth, window.innerHeight);
+  let screenResolution = new Vector2(width, height);
   let renderResolution = screenResolution.clone().divideScalar(6);
   renderResolution.x |= 0;
   renderResolution.y |= 0;
+  
+ camera.left = width / -cameraScale;
+  camera.right = width / cameraScale;
+  camera.top = height / cameraScale;
+  camera.bottom = height / -cameraScale;
+  camera.updateProjectionMatrix();
 
+  // camera.right = 1/aspectRatio;
   renderer.setSize(screenResolution.x, screenResolution.y);
   composer.setSize(screenResolution.x, screenResolution.y);
 }
+
 
 function animate() {
   requestAnimationFrame(animate);
@@ -960,11 +1188,14 @@ function animate() {
   controls.update();
 
   // Add subtle rotation to the entire cube for display
-  if (!isAnimating && !isSolving && isRotating) {
-    cubeGroup.rotation.y = Math.sin(0.02);
-    cubeGroup.rotation.x = Math.sin(-0.01);
+  if (isRotating) {
+    cubeGroup.rotation.y =2*Math.sin(timeSinceStart);
+    timeSinceStart += 0.01;  
+    // cubeGroup.rotation.x = Math.sin(-timeSinceStart);
   }
 
   // Render scene
   composer.render();
+  
 }
+
