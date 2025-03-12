@@ -2,6 +2,7 @@ import * as THREE from "three";
 // Raycasting for mouse interaction
 import { updateBloomHighlight, moveLightToFaceNormal } from "./light.js";
 
+// mouse components
 let currentRotation = 0;
 let dragStartPosition = null;
 let dragActive = false;
@@ -19,17 +20,6 @@ let lastClickedFace = -1;
 
 const CUBIE_SIZE = 0.2; // Size of each small cube
 const GAP = 0.01; // Gap between cubies
-
-// Colors for cube faces
-const COLORS = {
-  WHITE: 0xffffff, // Light pastel blue (normalized white)
-  RED: 0xff9999, // Light red (normalized)
-  BLUE: 0x66666ff, // Light blue (normalized)
-  ORANGE: 0xffcc99, // Light orange (normalized)
-  GREEN: 0x99ff99, // Light green (normalized)
-  YELLOW: 0xffff99, // Light yellow (normalized)
-  BLACK: 0x777777, // Light gray (normalized, not pure black)
-};
 
 export function onPointerDown(
   event,
@@ -225,7 +215,6 @@ export function onPointerMove(
           direction = dragVector.dot(worldZ) > 0 ? 1 : -1;
         }
         break;
-
       case "front": // +Z face
         if (
           Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldY))
@@ -277,7 +266,7 @@ export function onPointerMove(
         cubeGroup,
         scene,
         cubiesContainer,
-        rotationDelta
+        null,rotationDelta
       );
     }
   }
@@ -358,9 +347,12 @@ export function onPointerUp(
           isAnimating = false;
 
           // Add the move to history
-          const layerNames = ["L", "M", "R", "D", "E", "U", "B", "S", "F"];
-          const direction = quarterTurns > 0 ? "" : "'";
-          const moveName = layerNames[layerIndex] + direction;
+          // const layerNames = ["L", "M", "R", "D", "E", "U", "B", "S", "F"];
+          // console.log(quarterTurns)
+          // const direction = quarterTurns === 1 ? "" : quarterTurns === 2 ? "2" : "'";
+          // const moveName = layerNames[layerIndex] + direction;
+          const moveName = getMoveName(layerIndex, quarterTurns);
+          console.log(moveName);
           moveHistory.push(moveName);
 
           updateMoveHistory(historyDiv, moveHistory);
@@ -430,6 +422,35 @@ export function onPointerUp(
   isDragging = false;
 }
 
+function getMoveName(layerIndex, quarterTurns) {
+  console.log(layerIndex);
+  // const layerNames = ["U", "R", "F", "D", "L", "B"];
+  const layerNames = {0:"B", 6:"R", 2:"F", 3:"D", 8:"L", 5:"U"};
+
+  // Ensure layerIndex is within range
+  if (layerIndex < 0 || layerIndex >= layerNames.length) {
+    throw new Error("Invalid layer index: " + layerIndex);
+  }
+
+  const layer = layerNames[layerIndex];
+
+  // Wrap quarter turns to stay between -2 and 2
+  const wrappedTurns = ((quarterTurns % 4) + 4) % 4; // Ensures positive values
+
+  switch (wrappedTurns) {
+    case 0:
+      return ""; // No move
+    case 1:
+      return layer; // e.g., U, R, F
+    case 2:
+      return layer + "2"; // e.g., U2, R2, F2
+    case 3:
+      return layer + "'"; // e.g., U', R', F'
+    default:
+      throw new Error("Unexpected quarter turn value: " + wrappedTurns);
+  }
+}
+
 export function rotateLayer(
   layerIndex,
   direction,
@@ -440,7 +461,8 @@ export function rotateLayer(
   cubeGroup,
   scene,
   cubiesContainer,
-  proportionalAngle = null
+  animationTime = null, // used for buttons
+  proportionalAngle = null // used for pointer
 ) {
   // For complete rotations or initial setup
   if (proportionalAngle === null) {
@@ -503,7 +525,8 @@ export function rotateLayer(
 
     // Animation variables for complete rotation
     const targetAngle = (direction * Math.PI) / 2;
-    const duration = 500; // ms
+    
+    const duration = 100; // ms
     const startTime = performance.now();
 
     function animateRotation() {
@@ -588,7 +611,7 @@ export function rotateLayer(
     }
 
     // Update accumulated rotation
-    accumulatedRotation += proportionalAngle * direction;
+    accumulatedRotation += proportionalAngle * direction *0.69;
 
     // Apply the rotation directly (no animation)
     activeTempLayer.setRotationFromAxisAngle(

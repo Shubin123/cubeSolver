@@ -7,6 +7,10 @@ import { GlitchPass } from "three/examples/jsm/postprocessing/GlitchPass.js";
 import { RenderPixelatedPass } from "three/examples/jsm/postprocessing/RenderPixelatedPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
+import Cube from "cubejs";
+// Attach Cube to window for async.js
+window.Cube = Cube;
+
 import {
   onPointerDown,
   onPointerMove,
@@ -48,7 +52,8 @@ let cubeGroup; // Holds the entire Rubik's cube
 let layers = []; // Groups for each rotatable layer
 let isSolving = false;
 let isAnimating = false;
-let isRotating = false;
+let cubiePool = [];
+let cubiesContainer;
 
 // UI Components
 let moveHistory = [];
@@ -59,17 +64,10 @@ let resetButton;
 let rotateButton;
 let historyDiv;
 
-// Object pooling for better performance
-let cubiePool = [];
-let cubiesContainer;
-
-
-let raycaster;
-let mouse;
-
 // Initialize everything
 init();
 animate();
+initSolver();
 
 function init() {
   // Set up scene first
@@ -92,8 +90,8 @@ function init() {
   setupUI(directionalLights[0], directionalLights[1]);
 
   // Set up raycaster for mouse interaction
-  raycaster = new THREE.Raycaster();
-  mouse = new THREE.Vector2();
+  let raycaster = new THREE.Raycaster();
+  let mouse = new THREE.Vector2();
 
   // Add event listeners
   window.addEventListener("resize", onWindowResize);
@@ -445,7 +443,7 @@ function scrambleCube() {
   composer.addPass(glitchPass);
 
   // Reset history
-  moveHistory = [];
+
   updateMoveHistory(historyDiv, moveHistory);
 
   const moves = 10;
@@ -482,72 +480,153 @@ function scrambleCube() {
 
   doNextMove();
 }
-
-function solveCube() {
+let cubeInstance;
+async function solveCube() {
   if (isAnimating || isSolving || moveHistory.length === 0) return;
+  // Cube.initSolver();
 
   isSolving = true;
   solveButton.disabled = true;
   scrambleButton.disabled = true;
 
-  // Reverse all moves
-  const reverseMoves = moveHistory
-    .slice()
-    .reverse()
-    .map((move) => {
-      // If move ends with ', remove it; otherwise add it
-      return move.endsWith("'") ? move.slice(0, -1) : move + "'";
+  // Create a new Cube instance and input the moves as a string
+  cubeInstance = new Cube();
+  // console.log(Object.getOwnPropertyNames(Cube), Cube.moves); // 22 methods instead of the original confirm 13 we got async loaded first
+
+  // const randomCube = Cube.random();
+  // console.log(Object.getOwnPropertyNames(cubeInstance));
+
+  const cubeState = moveHistory.join(" ");
+  console.log("ci:before",cubeInstance.toJSON());
+  cubeInstance.move(cubeState);
+  // console.log("ci:after",cubeInstance);
+
+  
+  // console.log(moveHistory.length);
+  await Cube._asyncSolve(cubeInstance, null, (algorithm) => {
+    console.log("Solution:", algorithm);
+    let solution = algorithm.split(" ");
+    let fsolution = [];
+    solution.map((move) => {
+      if (move.includes(2)) {
+        fsolution.push(move[0], move[0]);
+      } else {
+        fsolution.push(move);
+      }
     });
 
-  let i = 0;
-  function doNextMove() {
-    if (i >= reverseMoves.length) {
-      isSolving = false;
-      solveButton.disabled = false;
-      scrambleButton.disabled = false;
-      moveHistory = [];
-      updateMoveHistory(historyDiv, moveHistory);
-      return;
-    }
+    let i = 0;
+    animateSequence(fsolution, i);
+  });
+}
 
-    const move = reverseMoves[i];
-    const layerName = move.charAt(0);
-    // FIXED: The direction should be -1 if it includes ' (prime) and 1 otherwise
-    const direction = move.includes("'") ? -1 : 1;
+function animateSequence(solution, i) {
+  if (i >= solution.length) {
+    // console.log(cubeInstance.isSolved());
+    console.log("ci:after",cubeInstance.toJSON());
 
-    // Map move notation to layer index
-    const layerMap = {
-      F: 8,
-      S: 7,
-      B: 6,
-      U: 5,
-      E: 4,
-      D: 3,
-      R: 2,
-      M: 1,
-      L: 0,
-    };
+    if (!cubeInstance.isSolved()) {console.log("not solved but ended?")}
+    endSequence();
+    return;
+  }
+  
+  if (cubeInstance.isSolved()) {
+    console.log("solved")
+    console.log("ci:after",cubeInstance.toJSON());
 
-    rotateLayer(
-      layerMap[layerName],
-      direction,
-      layers,
-      isAnimating,
-      moveHistory,
-      historyDiv,
-      cubeGroup,
-      scene,
-      cubiesContainer
-    );
-
-    // Wait for animation to complete before next move
-    setTimeout(() => {
-      i++;
-      doNextMove();
-    }, 600);
+    endSequence();
+    return;
   }
 
-  doNextMove();
+  const move = solution[i];
+  cubeInstance.move(move);
+  console.log("ci:during",cubeInstance.toJSON());
+
+  const layerName = move.charAt(0);
+  // If the move ends with a "'", reverse the direction
+  const direction = move.includes("'") ? -1 : 1;
+  
+
+  // Map move notation to layer index
+  const layerMap = {
+    F: 2,
+    S: 7,
+    B: 0,
+    U: 5,
+    E: 4,
+    D: 3,
+    R: 6,
+    M: 1,
+    L: 8,
+  };
+
+  // const layerMap = {
+  //   F: 8,
+  //   S: 7,
+  //   B: 6,
+  //   U: 5,
+  //   E: 4,
+  //   D: 3,
+  //   R: 2,
+  //   M: 1,
+  //   L: 0,
+  // };
+  let animationTime = 300;
+  rotateLayer(
+    layerMap[layerName],
+    direction,
+    layers,
+    isAnimating,
+    moveHistory,
+    historyDiv,
+    cubeGroup,
+    scene,
+    cubiesContainer,
+    animationTime
+  );
+
+  // Wait for animation to complete before next move
+  setTimeout(() => {
+    i++;
+    animateSequence(solution, i);
+  }, 200);
+
+}
+
+function endSequence() {
+  isSolving = false;
+  solveButton.disabled = false;
+  scrambleButton.disabled = false;
+  moveHistory = [];
+  updateMoveHistory(historyDiv, moveHistory);
+  return;
+}
+
+async function initSolver() {
+  // Load async.js dynamically
+  const asyncScript = document.createElement("script");
+  asyncScript.src = "./src/solver/async.js";
+  document.body.appendChild(asyncScript);
+
+  asyncScript.onload = () => {
+    // console.log('async.js loaded');
+
+    // Fetch worker.js content and create a Blob URL
+    fetch("./src/solver/worker.js")
+      .then((response) => response.text())
+      .then((workerCode) => {
+        const blob = new Blob([workerCode], { type: "application/javascript" });
+        const workerURL = URL.createObjectURL(blob);
+        // console.log("Before:", Cube.moveTables, Cube.pruningTables);
+
+        // console.log("After:", Cube.moveTables, Cube.pruningTables);
+
+        Cube.asyncInit(workerURL, function () {
+          // console.log("solver loaded");
+        });
+      })
+      .catch((error) => console.error("Failed to load worker:", error));
+  };
 }
 
 function resetCube() {
