@@ -425,7 +425,7 @@ export function onPointerUp(
 function getMoveName(layerIndex, quarterTurns) {
   console.log(layerIndex);
   // const layerNames = ["U", "R", "F", "D", "L", "B"];
-  const layerNames = {0:"B", 6:"R", 2:"F", 3:"D", 8:"L", 5:"U"};
+  const layerNames = {0:"L", 6:"B", 8:"F", 3:"D", 2:"R", 5:"U"};
 
   // Ensure layerIndex is within range
   if (layerIndex < 0 || layerIndex >= layerNames.length) {
@@ -441,11 +441,11 @@ function getMoveName(layerIndex, quarterTurns) {
     case 0:
       return ""; // No move
     case 1:
-      return layer; // e.g., U, R, F
+      return layer+ "'"; // e.g., U, R, Fx
     case 2:
       return layer + "2"; // e.g., U2, R2, F2
     case 3:
-      return layer + "'"; // e.g., U', R', F'
+      return layer; // e.g., U', R', F'
     default:
       throw new Error("Unexpected quarter turn value: " + wrappedTurns);
   }
@@ -526,7 +526,8 @@ export function rotateLayer(
     // Animation variables for complete rotation
     const targetAngle = (direction * Math.PI) / 2;
     
-    const duration = 100; // ms
+    let duration = 100; // ms
+    if (animationTime){ duration += animationTime;}
     const startTime = performance.now();
 
     function animateRotation() {

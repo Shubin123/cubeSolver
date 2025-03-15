@@ -481,96 +481,89 @@ function scrambleCube() {
   doNextMove();
 }
 let cubeInstance;
+
 async function solveCube() {
   if (isAnimating || isSolving || moveHistory.length === 0) return;
-  // Cube.initSolver();
-
+  
   isSolving = true;
   solveButton.disabled = true;
   scrambleButton.disabled = true;
-
-  // Create a new Cube instance and input the moves as a string
-  cubeInstance = new Cube();
-  // console.log(Object.getOwnPropertyNames(Cube), Cube.moves); // 22 methods instead of the original confirm 13 we got async loaded first
-
-  // const randomCube = Cube.random();
-  // console.log(Object.getOwnPropertyNames(cubeInstance));
-
-  const cubeState = moveHistory.join(" ");
-  console.log("ci:before",cubeInstance.toJSON());
-  cubeInstance.move(cubeState);
-  // console.log("ci:after",cubeInstance);
-
   
-  // console.log(moveHistory.length);
+  // Create a new Cube instance for solving
+  cubeInstance = new Cube();
+  console.log("Fresh cube state:", JSON.stringify(cubeInstance.toJSON()));
+  
+  // Apply all previous moves to reach current state
+  const cubeState = moveHistory.join(" ");
+  console.log("Applying scramble:", cubeState);
+  cubeInstance.move(cubeState);
+  console.log("After scramble:", JSON.stringify(cubeInstance.toJSON()));
+  
+  // Get the solution
   await Cube._asyncSolve(cubeInstance, null, (algorithm) => {
-    console.log("Solution:", algorithm);
+    console.log("Received solution:", algorithm);
+
+    // Proceed with animation...
     let solution = algorithm.split(" ");
     let fsolution = [];
-    solution.map((move) => {
-      if (move.includes(2)) {
+    solution.forEach((move) => {
+      if (move.includes("2")) {
         fsolution.push(move[0], move[0]);
       } else {
         fsolution.push(move);
       }
     });
-
+    
+    // Reset cube instance for animation
+    cubeInstance = new Cube();
+    cubeInstance.move(cubeState);
+    
+    // Start animation
     let i = 0;
     animateSequence(fsolution, i);
   });
 }
 
-function animateSequence(solution, i) {
-  if (i >= solution.length) {
-    // console.log(cubeInstance.isSolved());
-    console.log("ci:after",cubeInstance.toJSON());
 
-    if (!cubeInstance.isSolved()) {console.log("not solved but ended?")}
+
+function animateSequence(solution, i) {
+  // Check if we've completed all moves
+  if (i >= solution.length) {
+    console.log("ci:final", cubeInstance.toJSON());
+    
+    // Final verification
+    if (!cubeInstance.isSolved()) {
+      console.error("Error: Cube is not solved after applying all moves!");
+    } else {
+      console.log("Cube successfully solved!");
+    }
+    
     endSequence();
     return;
   }
   
-  if (cubeInstance.isSolved()) {
-    console.log("solved")
-    console.log("ci:after",cubeInstance.toJSON());
-
-    endSequence();
-    return;
-  }
-
+  // Apply the current move to the model
   const move = solution[i];
   cubeInstance.move(move);
-  console.log("ci:during",cubeInstance.toJSON());
-
+  console.log("ci:during", cubeInstance.toJSON());
+  
+  // Map move notation to layer index
   const layerName = move.charAt(0);
-  // If the move ends with a "'", reverse the direction
   const direction = move.includes("'") ? -1 : 1;
   
-
-  // Map move notation to layer index
   const layerMap = {
-    F: 2,
+    F: 8,
     S: 7,
-    B: 0,
+    B: 6,
     U: 5,
     E: 4,
     D: 3,
-    R: 6,
+    R: 2,
     M: 1,
-    L: 8,
+    L: 0,
   };
-
-  // const layerMap = {
-  //   F: 8,
-  //   S: 7,
-  //   B: 6,
-  //   U: 5,
-  //   E: 4,
-  //   D: 3,
-  //   R: 2,
-  //   M: 1,
-  //   L: 0,
-  // };
+  
+  // Animate the visual representation
   let animationTime = 300;
   rotateLayer(
     layerMap[layerName],
@@ -584,23 +577,25 @@ function animateSequence(solution, i) {
     cubiesContainer,
     animationTime
   );
-
+  
   // Wait for animation to complete before next move
   setTimeout(() => {
     i++;
     animateSequence(solution, i);
-  }, 200);
-
+  }, 600);
 }
 
 function endSequence() {
   isSolving = false;
   solveButton.disabled = false;
   scrambleButton.disabled = false;
-  moveHistory = [];
-  updateMoveHistory(historyDiv, moveHistory);
-  return;
+  // Clear move history after solving
+  
+  console.log(moveHistory);
+moveHistory = [];
+  updateMoveHistory(historyDiv,moveHistory);
 }
+
 
 async function initSolver() {
   // Load async.js dynamically
