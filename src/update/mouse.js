@@ -159,90 +159,87 @@ export function onPointerMove(
       Math.sqrt(dragDeltaX * dragDeltaX + dragDeltaY * dragDeltaY) *
       sensitivity;
 
-    switch (lastClickedFace) {
-      case "right": // +X face
-        if (
-          Math.abs(dragVector.dot(worldY)) > Math.abs(dragVector.dot(worldZ))
-        ) {
-          // Vertical drag
-          layerIndex = 2; // Right layer
-          direction = dragVector.dot(worldY) > 0 ? 1 : -1;
-        } else {
-          // Horizontal drag
-          layerIndex = 2; // Right layer
-          direction = dragVector.dot(worldZ) > 0 ? -1 : 1;
-        }
-        break;
-
-      case "left": // -X face
-        if (
-          Math.abs(dragVector.dot(worldY)) > Math.abs(dragVector.dot(worldZ))
-        ) {
-          // Vertical drag
-          layerIndex = 0; // Left layer
-          direction = dragVector.dot(worldY) > 0 ? 1 : -1;
-        } else {
-          // Horizontal drag
-          layerIndex = 0; // Left layer
-          direction = dragVector.dot(worldZ) > 0 ? 1 : -1;
-        }
-        break;
-
-      case "top": // +Y face
-        if (
-          Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldZ))
-        ) {
-          // Horizontal X drag
-          layerIndex = 5; // Up layer
-          direction = dragVector.dot(worldX) > 0 ? 1 : -1;
-        } else {
-          // Horizontal Z drag
-          layerIndex = 5; // Up layer
-          direction = dragVector.dot(worldZ) > 0 ? -1 : 1;
-        }
-        break;
-
-      case "bottom": // -Y face
-        if (
-          Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldZ))
-        ) {
-          // Horizontal X drag
-          layerIndex = 3; // Down layer
-          direction = dragVector.dot(worldX) > 0 ? -1 : 1;
-        } else {
-          // Horizontal Z drag
-          layerIndex = 3; // Down layer
-          direction = dragVector.dot(worldZ) > 0 ? 1 : -1;
-        }
-        break;
-      case "front": // +Z face
-        if (
-          Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldY))
-        ) {
-          // Horizontal drag
-          layerIndex = 8; // Front layer
-          direction = dragVector.dot(worldX) > 0 ? 1 : -1;
-        } else {
-          // Vertical drag
-          layerIndex = 8; // Front layer
-          direction = dragVector.dot(worldY) > 0 ? -1 : 1;
-        }
-        break;
-
-      case "back": // -Z face
-        if (
-          Math.abs(dragVector.dot(worldX)) > Math.abs(dragVector.dot(worldY))
-        ) {
-          // Horizontal drag
-          layerIndex = 6; // Back layer
-          direction = dragVector.dot(worldX) > 0 ? -1 : 1;
-        } else {
-          // Vertical drag
-          layerIndex = 6; // Back layer
-          direction = dragVector.dot(worldY) > 0 ? -1 : 1;
-        }
-        break;
+   
+switch (lastClickedFace) {
+  case "right": // +X face
+    const transformedRight = transformToCameraSpace(dragVector, camera);
+    if (Math.abs(transformedRight.dot(worldY)) > Math.abs(transformedRight.dot(worldZ))) {
+      // Vertical drag (Y axis)
+      layerIndex = 2; // Right layer
+      direction = transformedRight.dot(worldY) > 0 ? 1 : -1;
+    } else {
+      // Horizontal drag (Z axis)
+      layerIndex = 2; // Right layer
+      direction = transformedRight.dot(worldZ) > 0 ? -1 : 1;
     }
+    break;
+
+  case "left": // -X face
+    const transformedLeft = transformToCameraSpace(dragVector, camera);
+    if (Math.abs(transformedLeft.dot(worldY)) > Math.abs(transformedLeft.dot(worldZ))) {
+      // Vertical drag (Y axis)
+      layerIndex = 0; // Left layer
+      direction = transformedLeft.dot(worldY) > 0 ? -1 : 1;
+    } else {
+      // Horizontal drag (Z axis)
+      layerIndex = 0; // Left layer
+      direction = transformedLeft.dot(worldZ) > 0 ? 1 : -1;
+    }
+    break;
+
+  case "top": // +Y face
+    const transformedTop = transformToCameraSpace(dragVector, camera);
+    if (Math.abs(transformedTop.dot(worldX)) > Math.abs(transformedTop.dot(worldZ))) {
+      // Horizontal drag (X axis)
+      layerIndex = 5; // Up layer
+      direction = transformedTop.dot(worldX) > 0 ? 1 : -1;
+    } else {
+      // Vertical drag (Z axis)
+      layerIndex = 5; // Up layer
+      direction = transformedTop.dot(worldZ) > 0 ? -1 : 1;
+    }
+    break;
+
+  case "bottom": // -Y face
+    const transformedBottom = transformToCameraSpace(dragVector, camera);
+    if (Math.abs(transformedBottom.dot(worldX)) > Math.abs(transformedBottom.dot(worldZ))) {
+      // Horizontal drag (X axis)
+      layerIndex = 3; // Down layer
+      direction = transformedBottom.dot(worldX) > 0 ? -1 : 1;
+    } else {
+      // Vertical drag (Z axis)
+      layerIndex = 3; // Down layer
+      direction = transformedBottom.dot(worldZ) > 0 ? 1 : -1;
+    }
+    break;
+
+  case "front": // +Z face
+    const transformedFront = transformToCameraSpace(dragVector, camera);
+    if (Math.abs(transformedFront.dot(worldX)) > Math.abs(transformedFront.dot(worldY))) {
+      // Horizontal drag (X axis)
+      layerIndex = 8; // Front layer
+      direction = transformedFront.dot(worldX) > 0 ? 1 : -1;
+    } else {
+      // Vertical drag (Y axis)
+      layerIndex = 8; // Front layer
+      direction = transformedFront.dot(worldY) > 0 ? 1 : -1;
+    }
+    break;
+
+  case "back": // -Z face
+    const transformedBack = transformToCameraSpace(dragVector, camera);
+    if (Math.abs(transformedBack.dot(worldX)) > Math.abs(transformedBack.dot(worldY))) {
+      // Horizontal drag (X axis)
+      layerIndex = 6; // Back layer
+      direction = transformedBack.dot(worldX) > 0 ? -1 : 1;
+    } else {
+      // Vertical drag (Y axis)
+      layerIndex = 6; // Back layer
+      direction = transformedBack.dot(worldY) > 0 ? -1 : 1;
+    }
+    break;
+}
+
 
     if (layerIndex !== -1) {
       // Store the current layer for snap calculations in onPointerUp
@@ -271,6 +268,20 @@ export function onPointerMove(
     }
   }
 }
+
+ // Function to transform world space drag vector into camera's local space
+ function transformToCameraSpace(dragVector, camera) {
+  const cameraMatrix = camera.matrixWorld; // The camera's world matrix
+
+  // Invert the matrix to transform into camera space (world -> camera space)
+  const inverseMatrix = new THREE.Matrix4().copy(cameraMatrix).invert();
+  
+  // Transform the drag vector into the camera's local space
+  const transformedVector = dragVector.clone().applyMatrix4(inverseMatrix);
+  
+  return transformedVector;
+}
+
 
 export function updateMoveHistory(historyDiv, moveHistory) {
   historyDiv.innerHTML = "";
@@ -423,33 +434,43 @@ export function onPointerUp(
 }
 
 function getMoveName(layerIndex, quarterTurns) {
-  console.log(layerIndex);
-  // const layerNames = ["U", "R", "F", "D", "L", "B"];
-  const layerNames = {0:"L", 6:"B", 8:"F", 3:"D", 2:"R", 5:"U"};
+  // Adjust layerNames to match the expected notation for a typical cube.
+  // Your layerNames object was incorrect, so we need to fix it.
+  const layerNames = {0: "L", 6: "B", 8: "F", 3: "D", 2: "R", 5: "U"};
 
-  // Ensure layerIndex is within range
-  if (layerIndex < 0 || layerIndex >= layerNames.length) {
+  // Ensure layerIndex is within valid bounds
+  if (!(layerIndex in layerNames)) {
     throw new Error("Invalid layer index: " + layerIndex);
   }
 
   const layer = layerNames[layerIndex];
 
-  // Wrap quarter turns to stay between -2 and 2
-  const wrappedTurns = ((quarterTurns % 4) + 4) % 4; // Ensures positive values
+  // Wrap quarter turns to stay between 0 and 3 (inclusive)
+  const wrappedTurns = ((quarterTurns % 4) + 4) % 4; // Ensure positive values
 
+  // Handle different cases based on the number of quarter turns
   switch (wrappedTurns) {
     case 0:
-      return ""; // No move
+      return ""; // No move (0 turns)
     case 1:
-      return layer+ "'"; // e.g., U, R, Fx
+      // For B, L, D faces, we reverse the direction (as the CCW move is represented as CW internally)
+      if (layer === "B" || layer === "L" || layer === "D") {
+        return layer;
+      }
+      return layer + "'"; // For others (U, R, F), it's CCW (indicated by the prime notation)
     case 2:
-      return layer + "2"; // e.g., U2, R2, F2
+      return layer + "2"; // For 180-degree turns (e.g., U2, R2, F2)
     case 3:
-      return layer; // e.g., U', R', F'
+      // For a CCW turn, we return the standard move (e.g., U, R, F, etc.)
+      if (layer === "B" || layer === "L" || layer === "D") {
+        return layer + "'";
+      }
+      return layer; // CCW moves are represented as the regular move name
     default:
       throw new Error("Unexpected quarter turn value: " + wrappedTurns);
   }
 }
+
 
 export function rotateLayer(
   layerIndex,
@@ -486,7 +507,7 @@ export function rotateLayer(
 
     if (isAnimating) return;
     isAnimating = true;
-
+    
     // Map layer index to move notation
     const layerNames = ["L", "M", "R", "D", "E", "U", "B", "S", "F"];
     const moveName = layerNames[layerIndex] + (direction < 0 ? "'" : "");

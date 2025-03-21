@@ -482,6 +482,7 @@ function scrambleCube() {
 }
 let cubeInstance;
 
+
 async function solveCube() {
   if (isAnimating || isSolving || moveHistory.length === 0) return;
   
@@ -516,6 +517,7 @@ async function solveCube() {
     
     // Reset cube instance for animation
     cubeInstance = new Cube();
+    
     cubeInstance.move(cubeState);
     
     // Start animation
@@ -524,9 +526,13 @@ async function solveCube() {
   });
 }
 
-
-
 function animateSequence(solution, i) {
+  // if (cubeInstance.isSolved()) {
+  //   endSequence();
+  //   return;
+  // }
+
+
   // Check if we've completed all moves
   if (i >= solution.length) {
     console.log("ci:final", cubeInstance.toJSON());
@@ -545,26 +551,40 @@ function animateSequence(solution, i) {
   // Apply the current move to the model
   const move = solution[i];
   cubeInstance.move(move);
-  console.log("ci:during", cubeInstance.toJSON());
+  // console.log("ci:during", cubeInstance.toJSON());
   
   // Map move notation to layer index
   const layerName = move.charAt(0);
-  const direction = move.includes("'") ? -1 : 1;
+
+  let direction = move.includes("'") ? 1 : -1;
+ if (layerName.includes('B') || layerName.includes('L') || layerName.includes('D')) {
+    direction = -direction;  // Invert the direction for these faces
+  }
   
   const layerMap = {
     F: 8,
-    S: 7,
     B: 6,
     U: 5,
-    E: 4,
     D: 3,
     R: 2,
-    M: 1,
     L: 0,
   };
   
+  // const layerMap = {
+  //   F: 2,
+  //   S: 7,
+  //   B: 0,
+  //   U: 5,
+  //   E: 4,
+  //   D: 3,
+  //   R: 6,
+  //   M: 1,
+  //   L: 8,
+  // };
+
   // Animate the visual representation
-  let animationTime = 300;
+  let animationTime = 100;
+  let waitTime = 300;
   rotateLayer(
     layerMap[layerName],
     direction,
@@ -582,7 +602,7 @@ function animateSequence(solution, i) {
   setTimeout(() => {
     i++;
     animateSequence(solution, i);
-  }, 600);
+  }, waitTime);
 }
 
 function endSequence() {
@@ -592,10 +612,9 @@ function endSequence() {
   // Clear move history after solving
   
   console.log(moveHistory);
-moveHistory = [];
+  moveHistory = [];
   updateMoveHistory(historyDiv,moveHistory);
 }
-
 
 async function initSolver() {
   // Load async.js dynamically
