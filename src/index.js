@@ -527,10 +527,10 @@ async function solveCube() {
 }
 
 function animateSequence(solution, i) {
-  // if (cubeInstance.isSolved()) {
-  //   endSequence();
-  //   return;
-  // }
+  if (cubeInstance.isSolved()) {
+    endSequence();
+    return;
+  }
 
 
   // Check if we've completed all moves
