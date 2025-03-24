@@ -53,7 +53,9 @@ let layers = []; // Groups for each rotatable layer
 let isSolving = false;
 let isAnimating = false;
 let cubiePool = [];
+let cubeString = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB";
 let cubiesContainer;
+let cubeInstance;
 
 // UI Components
 let moveHistory = [];
@@ -63,6 +65,7 @@ let extraBloomButton;
 let resetButton;
 let rotateButton;
 let historyDiv;
+let colorSelect;
 
 // Initialize everything
 init();
@@ -104,7 +107,8 @@ function init() {
       isAnimating,
       isSolving,
       camera,
-      cubeGroup
+      cubeGroup,
+      colorSelect
     );
   });
   window.addEventListener("pointermove", (event) => {
@@ -173,9 +177,16 @@ function setupRenderer() {
 
   // Post-processing
   composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPixelatedPass(pixelFactor, scene, camera));
+  composer.addPass(new RenderPixelatedPass(2, scene, camera));
   bloomPass = new UnrealBloomPass(screenResolution, 0.2, 0.1, 0.5);
   composer.addPass(bloomPass);
+
+  console.log(composer.passes[0]);
+  console.log(composer.passes[0].pixelSize);
+  composer.passes[0].pixelSize = 10;
+  console.log(composer.passes[0].pixelSize);
+  composer.reset();
+
 
   //   composer.addPass(new PixelatePass(renderResolution))
 }
@@ -227,6 +238,8 @@ function createFaceMaterial(color) {
 }
 
 function setupUI(dl1, dl2) {
+  
+{
   const uiContainer = document.createElement("div");
   uiContainer.style.position = "absolute";
   uiContainer.style.top = "10px";
@@ -235,12 +248,33 @@ function setupUI(dl1, dl2) {
   uiContainer.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
   uiContainer.style.borderRadius = "5px";
   uiContainer.style.color = "white";
+  uiContainer.style.display = "none"; // Initially hidden
   document.body.appendChild(uiContainer);
+
+  // Create hamburger menu button
+  const hamburgerMenuButton = document.createElement("button");
+  hamburgerMenuButton.textContent = "☰";
+  hamburgerMenuButton.style.position = "absolute";
+  hamburgerMenuButton.style.top = "10px";
+  hamburgerMenuButton.style.left = "10px";
+  hamburgerMenuButton.style.padding = "10px";
+  hamburgerMenuButton.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+  hamburgerMenuButton.style.color = "white";
+  hamburgerMenuButton.style.border = "none";
+  hamburgerMenuButton.style.cursor = "pointer";
+  hamburgerMenuButton.style.fontSize = "50px";
+  document.body.appendChild(hamburgerMenuButton);
+
+  // Toggle menu visibility when hamburger button is clicked
+  hamburgerMenuButton.addEventListener("click", () => {
+    uiContainer.style.display = uiContainer.style.display === "none" ? "block" : "none";
+  });
 
   // Title
   const title = document.createElement("h2");
   title.textContent = "Rubik's Cube Solver";
   title.style.margin = "0 0 10px 0";
+  title.style.textAlign = "center";
   uiContainer.appendChild(title);
 
   // Buttons
@@ -255,7 +289,7 @@ function setupUI(dl1, dl2) {
   solveButton.textContent = "Solve";
   solveButton.style.marginRight = "5px";
   solveButton.style.padding = "5px 10px";
-  solveButton.addEventListener("click", solveCube);
+  solveButton.addEventListener("click", solveCubeHistoric);
   uiContainer.appendChild(solveButton);
 
   resetButton = document.createElement("button");
@@ -307,6 +341,55 @@ function setupUI(dl1, dl2) {
         <p>shift-click and pan the view</p>
     `;
   uiContainer.appendChild(controlsText);
+}
+
+const paletteContainer = document.createElement("div");
+paletteContainer.style.position = "absolute";
+paletteContainer.style.top = "50px";
+paletteContainer.style.left = "10px";
+// paletteContainer.style.padding = "10px";
+// paletteContainer.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+paletteContainer.style.borderRadius = "5px";
+paletteContainer.style.color = "white";
+paletteContainer.style.display = "flex";
+paletteContainer.style.flexDirection = "column";  // Arrange buttons vertically
+paletteContainer.style.scale = "1";
+
+paletteContainer.style.translate = "30rem 10rem";
+// paletteContainer.style.alignContent = "center";
+
+document.body.appendChild(paletteContainer);
+
+// Loop through the COLORS object to create buttons for each color
+Object.keys(COLORS).forEach((colorName) => {
+  const colorButton = document.createElement("button");
+  colorButton.style.margin = "5px 0";  // Add vertical spacing between buttons
+  colorButton.style.padding = "20px";  // Size of the button
+  colorButton.style.backgroundColor = `#${COLORS[colorName].toString(16)}`;
+  colorButton.style.color = "white";
+  colorButton.style.border = "none";
+  colorButton.style.cursor = "pointer";
+
+  // Event listener to set the selected color
+  colorButton.addEventListener("click", () => {
+    // Here we set the color on the currently selected face (this part is custom and can be linked to a 3D model or a UI state)
+    console.log(`Selected color: ${colorName}`);
+    // You can modify this code to apply the color to the cube face in your UI or logic
+    selectedColor(COLORS[colorName]);
+  });
+
+  paletteContainer.appendChild(colorButton);
+});
+
+}
+
+function selectedColor(colorValue) {
+  // Implement this function to modify the cube's face or visual representation
+  
+  colorSelect = colorValue;
+
+
+  
 }
 
 function createRubiksCube() {
@@ -480,10 +563,59 @@ function scrambleCube() {
 
   doNextMove();
 }
-let cubeInstance;
-
 
 async function solveCube() {
+  // if (isAnimating || isSolving || moveHistory.length === 0) return;
+  
+  isSolving = true;
+  solveButton.disabled = true;
+  scrambleButton.disabled = true;
+  
+  // Create a new Cube instance for solving
+  // const userCubeState = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB";
+  const userCubeState =    "FURUUUDFRRFLBLDDLLRBBFRRRFLRRRUDDBBULRFRUDFFBLRLLUDDFB";
+  
+  cubeInstance = Cube.fromString(userCubeState);
+  console.log(cubeInstance.toJSON(), cubeInstance.isSolved());
+  
+  // console.log("Fresh cube state:", JSON.stringify(cubeInstance.toJSON()));
+  
+  // Apply all previous moves to reach current state
+  // const cubeState = moveHistory.join(" ");
+  // console.log("Applying scramble:", cubeState);
+  
+  // cubeInstance.move(cubeState);
+  
+
+  console.log("After scramble:",cubeInstance.asString());
+  
+  // Get the solution
+  await Cube._asyncSolve(cubeInstance, null, (algorithm) => {
+    console.log("Received solution:", algorithm);
+
+    // Proceed with animation...
+    let solution = algorithm.split(" ");
+    let fsolution = [];
+    solution.forEach((move) => {
+      if (move.includes("2")) {
+        fsolution.push(move[0], move[0]);
+      } else {
+        fsolution.push(move);
+      }
+    });
+    
+    // Reset cube instance for animation
+    cubeInstance = new Cube();
+    
+    cubeInstance.move(cubeState);
+    
+    // Start animation
+    let i = 0;
+    animateSequence(fsolution, i);
+  });
+}
+
+async function solveCubeHistoric() {
   if (isAnimating || isSolving || moveHistory.length === 0) return;
   
   isSolving = true;
@@ -492,13 +624,18 @@ async function solveCube() {
   
   // Create a new Cube instance for solving
   cubeInstance = new Cube();
-  console.log("Fresh cube state:", JSON.stringify(cubeInstance.toJSON()));
+  console.log(cubeInstance.toJSON(), cubeInstance.isSolved());
+  
+  // console.log("Fresh cube state:", JSON.stringify(cubeInstance.toJSON()));
   
   // Apply all previous moves to reach current state
   const cubeState = moveHistory.join(" ");
-  console.log("Applying scramble:", cubeState);
+  // console.log("Applying scramble:", cubeState);
+  
   cubeInstance.move(cubeState);
-  console.log("After scramble:", JSON.stringify(cubeInstance.toJSON()));
+  
+
+  // console.log("After scramble:",cubeInstance.asString());
   
   // Get the solution
   await Cube._asyncSolve(cubeInstance, null, (algorithm) => {
@@ -684,11 +821,12 @@ function onWindowResize() {
 }
 
 function animate() {
-  requestAnimationFrame(animate);
 
   // Update controls
   controls.update();
 
   // Render scene
   composer.render();
+  requestAnimationFrame(animate);
+
 }

@@ -29,7 +29,8 @@ export function onPointerDown(
   isAnimating,
   isSolving,
   camera,
-  cubeGroup
+  cubeGroup,
+  colorSelect
 ) {
   if (isAnimating || isSolving) return;
 
@@ -48,8 +49,27 @@ export function onPointerDown(
   });
 
   const intersects = raycaster.intersectObjects(allCubies, false);
+  
 
+  
   if (intersects.length > 0) {
+    if (colorSelect) {
+      // console.log(intersects[0].object.material);
+      // console.log(intersects[0].object);
+      intersects[0].object.material.forEach(element => {
+        console.log(element);
+        // element.wireframe = true;
+        element.color.r = 255/25;
+        element.color.g = 153/25;
+        element.color.b = 153/25;
+        
+      });
+      // intersects[0].object.material.color.set(THREE.RED_GREEN_RGTC2_Format);
+      // intersects[0].object.material.position = new THREE.Vector3(6969, 0, 0);
+      controls.enabled = false;
+      return;
+    }
+    
     controls.enabled = false;
     selectedCubie = intersects[0].object;
     dragStartPoint = intersects[0].point.clone();
@@ -88,7 +108,7 @@ export function onPointerDown(
       }
     }
 
-    isDragging = true;
+    isDragging = true; // for pallet mode set to false.
     currentRotation = 0;
     updateBloomHighlight();
   }
@@ -162,7 +182,7 @@ export function onPointerMove(
    
 switch (lastClickedFace) {
   case "right": // +X face
-    const transformedRight = transformToCameraSpace(dragVector, camera);
+    const transformedRight = dragVector; // dont transform non rotating axis
     if (Math.abs(transformedRight.dot(worldY)) > Math.abs(transformedRight.dot(worldZ))) {
       // Vertical drag (Y axis)
       layerIndex = 2; // Right layer
@@ -170,12 +190,12 @@ switch (lastClickedFace) {
     } else {
       // Horizontal drag (Z axis)
       layerIndex = 2; // Right layer
-      direction = transformedRight.dot(worldZ) > 0 ? -1 : 1;
+      direction = transformedRight.dot(worldZ) > 0 ? 1 : -1;
     }
     break;
 
   case "left": // -X face
-    const transformedLeft = transformToCameraSpace(dragVector, camera);
+    const transformedLeft = dragVector; // dont transform non rotating axis
     if (Math.abs(transformedLeft.dot(worldY)) > Math.abs(transformedLeft.dot(worldZ))) {
       // Vertical drag (Y axis)
       layerIndex = 0; // Left layer
@@ -188,7 +208,7 @@ switch (lastClickedFace) {
     break;
 
   case "top": // +Y face
-    const transformedTop = transformToCameraSpace(dragVector, camera);
+    const transformedTop = dragVector
     if (Math.abs(transformedTop.dot(worldX)) > Math.abs(transformedTop.dot(worldZ))) {
       // Horizontal drag (X axis)
       layerIndex = 5; // Up layer
@@ -201,7 +221,7 @@ switch (lastClickedFace) {
     break;
 
   case "bottom": // -Y face
-    const transformedBottom = transformToCameraSpace(dragVector, camera);
+    const transformedBottom = dragVector
     if (Math.abs(transformedBottom.dot(worldX)) > Math.abs(transformedBottom.dot(worldZ))) {
       // Horizontal drag (X axis)
       layerIndex = 3; // Down layer
@@ -214,7 +234,7 @@ switch (lastClickedFace) {
     break;
 
   case "front": // +Z face
-    const transformedFront = transformToCameraSpace(dragVector, camera);
+    const transformedFront = dragVector;
     if (Math.abs(transformedFront.dot(worldX)) > Math.abs(transformedFront.dot(worldY))) {
       // Horizontal drag (X axis)
       layerIndex = 8; // Front layer
@@ -227,7 +247,7 @@ switch (lastClickedFace) {
     break;
 
   case "back": // -Z face
-    const transformedBack = transformToCameraSpace(dragVector, camera);
+    const transformedBack = dragVector;
     if (Math.abs(transformedBack.dot(worldX)) > Math.abs(transformedBack.dot(worldY))) {
       // Horizontal drag (X axis)
       layerIndex = 6; // Back layer
@@ -268,20 +288,6 @@ switch (lastClickedFace) {
     }
   }
 }
-
- // Function to transform world space drag vector into camera's local space
- function transformToCameraSpace(dragVector, camera) {
-  const cameraMatrix = camera.matrixWorld; // The camera's world matrix
-
-  // Invert the matrix to transform into camera space (world -> camera space)
-  const inverseMatrix = new THREE.Matrix4().copy(cameraMatrix).invert();
-  
-  // Transform the drag vector into the camera's local space
-  const transformedVector = dragVector.clone().applyMatrix4(inverseMatrix);
-  
-  return transformedVector;
-}
-
 
 export function updateMoveHistory(historyDiv, moveHistory) {
   historyDiv.innerHTML = "";
