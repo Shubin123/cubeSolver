@@ -45,6 +45,7 @@ let composer;
 let controls;
 let bloomPass;
 let glitchPass;
+let pixelPass;
 // let lastClickedFace = -1;
 
 // Cube components
@@ -66,6 +67,7 @@ let resetButton;
 let rotateButton;
 let historyDiv;
 let colorSelect;
+
 
 // Initialize everything
 init();
@@ -177,19 +179,13 @@ function setupRenderer() {
 
   // Post-processing
   composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPixelatedPass(2, scene, camera));
+  pixelPass = new RenderPixelatedPass(2, scene, camera);
+  composer.addPass(pixelPass);
   bloomPass = new UnrealBloomPass(screenResolution, 0.2, 0.1, 0.5);
   composer.addPass(bloomPass);
-
-  console.log(composer.passes[0]);
-  console.log(composer.passes[0].pixelSize);
-  composer.passes[0].pixelSize = 10;
-  console.log(composer.passes[0].pixelSize);
-  composer.reset();
-
-
-  //   composer.addPass(new PixelatePass(renderResolution))
 }
+
+
 
 function setupLights() {
   // Ambient light
@@ -385,11 +381,7 @@ Object.keys(COLORS).forEach((colorName) => {
 
 function selectedColor(colorValue) {
   // Implement this function to modify the cube's face or visual representation
-  
-  colorSelect = colorValue;
-
-
-  
+  colorSelect = colorValue;  
 }
 
 function createRubiksCube() {
@@ -821,12 +813,12 @@ function onWindowResize() {
 }
 
 function animate() {
-
+  
   // Update controls
   controls.update();
 
   // Render scene
   composer.render();
+  
   requestAnimationFrame(animate);
-
 }
