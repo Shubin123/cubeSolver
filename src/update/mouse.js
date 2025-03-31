@@ -30,6 +30,7 @@ export function onPointerDown(
   isSolving,
   camera,
   cubeGroup,
+  cubeString,
   colorSelect
 ) {
   if (isAnimating || isSolving) return;
@@ -48,27 +49,12 @@ export function onPointerDown(
     }
   });
 
+
   const intersects = raycaster.intersectObjects(allCubies, false);
   
 
   
   if (intersects.length > 0) {
-    if (colorSelect) {
-      // console.log(intersects[0].object.material);
-      // console.log(intersects[0].object);
-      intersects[0].object.material.forEach(element => {
-        console.log(element);
-        // element.wireframe = true;
-        element.color.r = 255/25;
-        element.color.g = 153/25;
-        element.color.b = 153/25;
-        
-      });
-      // intersects[0].object.material.color.set(THREE.RED_GREEN_RGTC2_Format);
-      // intersects[0].object.material.position = new THREE.Vector3(6969, 0, 0);
-      controls.enabled = false;
-      return;
-    }
     
     controls.enabled = false;
     selectedCubie = intersects[0].object;
@@ -107,12 +93,53 @@ export function onPointerDown(
         lastClickedFace = "back"; // -Z face
       }
     }
+    if (colorSelect) {
+      console.log(intersects[0].object.material);
+      
+      // console.log(intersects[0].object);
+      intersects[0].object.material.forEach(element => {
+        // console.log(element, lastClickedFace,allCubies);
+        // console.log(hexToRGB(colorSelect[0]), cubeString);
 
+        let rgb = hexToRGB(colorSelect[0]);
+        // element.wireframe = true;
+        // element.color.r = 255/25;
+        // element.color.g = 153/25;
+        // element.color.b = 153/25;
+        let a = 100;
+        element.color.r = rgb.r/a;
+        element.color.g = rgb.g/a;
+        element.color.b = rgb.b/a;
+        
+        
+      });
+      // intersects[0].object.material.color.set(THREE.RED_GREEN_RGTC2_Format);
+      // intersects[0].object.material.position = new THREE.Vector3(6969, 0, 0);
+      return;
+    }
     isDragging = true; // for pallet mode set to false.
     currentRotation = 0;
     updateBloomHighlight();
   }
 }
+
+
+
+function hexToRGB(hex) {
+  // Remove # if present
+  hex = hex.toString(16)
+
+  // Parse the hex value
+  const bigint = parseInt(hex, 16);
+
+  // Extract RGB components
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+
+  return { r, g, b };
+}
+
 
 export function onPointerMove(
   event,

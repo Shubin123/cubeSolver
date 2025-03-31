@@ -28,9 +28,9 @@ const GAP = 0.01; // Gap between cubies
 
 // Colors for cube faces
 const COLORS = {
-  WHITE: 0xffffff, // Light pastel blue (normalized white)
-  RED: 0xff9999, // Light red (normalized)
-  BLUE: 0x66666ff, // Light blue (normalized)
+  WHITE: 0xffffff, // Light pastel blue (UP)
+  RED: 0xff9999, // Light red (RIGHT)
+  BLUE: 0x66666ff, // Light blue (FRONT)
   ORANGE: 0xffcc99, // Light orange (normalized)
   GREEN: 0x99ff99, // Light green (normalized)
   YELLOW: 0xffff99, // Light yellow (normalized)
@@ -110,6 +110,7 @@ function init() {
       isSolving,
       camera,
       cubeGroup,
+      cubeString,
       colorSelect
     );
   });
@@ -375,13 +376,14 @@ Object.keys(COLORS).forEach((colorName) => {
   });
 
   paletteContainer.appendChild(colorButton);
+  
 });
 
 }
 
-function selectedColor(colorValue) {
+function selectedColor(colorValue, colorName) {
   // Implement this function to modify the cube's face or visual representation
-  colorSelect = colorValue;  
+  colorSelect = [colorValue,colorName];  
 }
 
 function createRubiksCube() {
