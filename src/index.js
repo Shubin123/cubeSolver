@@ -91,6 +91,7 @@ let isPlayingSolution = false;
 let playTimeoutId = null;
 let initialCubeState = null;
 let initialHasPainted = false;
+let playbackSpeedMultiplier = 1.0;
 
 function saveCubeStateToStorage() {
   localStorage.setItem("hasPainted", window.hasPainted ? "true" : "false");
@@ -244,6 +245,40 @@ function setupScrubber() {
   scrubberSlider.value = 0;
   sliderRow.appendChild(scrubberSlider);
   scrubberContainer.appendChild(sliderRow);
+  
+  const settingsRow = document.createElement("div");
+  settingsRow.className = "settings-row";
+  
+  const speedLabel = document.createElement("span");
+  speedLabel.className = "speed-label";
+  speedLabel.textContent = "Speed: ";
+  settingsRow.appendChild(speedLabel);
+  
+  const speedSelect = document.createElement("select");
+  speedSelect.className = "speed-select";
+  
+  const speeds = [
+    { name: "0.25x (Very Slow)", val: 4.0 },
+    { name: "0.5x (Slow)", val: 2.0 },
+    { name: "1x (Normal)", val: 1.0 },
+    { name: "2x (Fast)", val: 0.5 },
+    { name: "4x (Very Fast)", val: 0.25 }
+  ];
+  
+  speeds.forEach(speed => {
+    const opt = document.createElement("option");
+    opt.value = speed.val;
+    opt.textContent = speed.name;
+    if (speed.val === 1.0) opt.selected = true;
+    speedSelect.appendChild(opt);
+  });
+  
+  speedSelect.addEventListener("change", (e) => {
+    playbackSpeedMultiplier = parseFloat(e.target.value);
+  });
+  
+  settingsRow.appendChild(speedSelect);
+  scrubberContainer.appendChild(settingsRow);
   
   const controlsRow = document.createElement("div");
   controlsRow.className = "controls-row";
@@ -437,19 +472,22 @@ function playNextStep() {
   
   const layerMap = { F: 8, B: 6, U: 5, D: 3, R: 2, L: 0 };
   
-  isAnimating = true;
+  const animTime = Math.max(10, Math.round(400 * playbackSpeedMultiplier));
+  const waitTime = Math.max(20, Math.round(800 * playbackSpeedMultiplier));
+
   rotateLayer(
     layerMap[layerName],
     direction,
     layers,
-    isAnimating,
+    false,
     moveHistory,
     historyDiv,
     cubeGroup,
     scene,
     cubiesContainer,
-    400
+    animTime
   );
+  isAnimating = true;
   
   solutionCurrentStep++;
   scrubberSlider.value = solutionCurrentStep;
@@ -463,7 +501,7 @@ function playNextStep() {
   playTimeoutId = setTimeout(() => {
     isAnimating = false;
     playNextStep();
-  }, 800);
+  }, waitTime);
 }
 
 // Initialize everything
