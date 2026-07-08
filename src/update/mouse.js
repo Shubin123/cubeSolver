@@ -41,21 +41,13 @@ export function onPointerDown(
 
   raycaster.setFromCamera(mouse, camera);
 
-  // Find all cubies
-  const allCubies = [];
-  cubeGroup.traverse((object) => {
-    if (object instanceof THREE.Mesh && object.userData.isCubie) {
-      allCubies.push(object);
-    }
-  });
+  // Instead of collecting cubies, let's create a direct mapping of materials to positions
+  // This only needs to be done once and could be moved outside this function for better performance
+  const materialToIndexMap = createMaterialMapping(cubeGroup);
 
-
-  const intersects = raycaster.intersectObjects(allCubies, false);
-  
-
+  const intersects = raycaster.intersectObjects(cubeGroup.children, true);
   
   if (intersects.length > 0) {
-    
     controls.enabled = false;
     selectedCubie = intersects[0].object;
     dragStartPoint = intersects[0].point.clone();
@@ -65,65 +57,219 @@ export function onPointerDown(
     const faceNormal = intersects[0].face.normal.clone();
     faceNormal.transformDirection(selectedCubie.matrixWorld);
 
-    // Determine which global face was clicked based on normal
+    // Determine the clicked face normal as before
     const absX = Math.abs(faceNormal.x);
     const absY = Math.abs(faceNormal.y);
     const absZ = Math.abs(faceNormal.z);
 
-    // Find the dominant axis
     if (absX > absY && absX > absZ) {
-      // X-axis is dominant
-      if (faceNormal.x > 0) {
-        lastClickedFace = "right"; // +X face
-      } else {
-        lastClickedFace = "left"; // -X face
-      }
+      lastClickedFace = faceNormal.x > 0 ? "right" : "left";
     } else if (absY > absX && absY > absZ) {
-      // Y-axis is dominant
-      if (faceNormal.y > 0) {
-        lastClickedFace = "top"; // +Y face
-      } else {
-        lastClickedFace = "bottom"; // -Y face
+      lastClickedFace = faceNormal.y > 0 ? "top" : "bottom";
+    } else {
+      lastClickedFace = faceNormal.z > 0 ? "front" : "back";
+    }
+
+    // Get the clicked material
+    const materialIndex = intersects[0].face.materialIndex;
+    const clickedMaterial = Array.isArray(selectedCubie.material) ? 
+      selectedCubie.material[materialIndex] : selectedCubie.material;
+    
+    // Find the cubeString index for this specific material
+    const stringIndex = materialToIndexMap.get(clickedMaterial.uuid);
+    
+    if (stringIndex !== undefined) {
+      console.log(`Clicked on facelet at cubeString index ${stringIndex}`);
+      console.log(`Current color at this position: ${cubeString[stringIndex]}`);
+      
+      if (colorSelect) {
+        // Apply color to the clicked material
+        let rgb = hexToRGB(colorSelect[0]);
+        let a = 100;
+        
+        // Update just the clicked material's color
+        clickedMaterial.color.r = rgb.r/a;
+        clickedMaterial.color.g = rgb.g/a;
+        clickedMaterial.color.b = rgb.b/a;
+        
+        // Update the cubeString
+        const newColorLetter = mapColorToLetter(colorSelect[0]);
+        if (newColorLetter) {
+          cubeString = cubeString.substring(0, stringIndex) + newColorLetter + cubeString.substring(stringIndex + 1);
+          console.log(`Updated cubeString: ${cubeString}`);
+        }
+        
+        return;
       }
     } else {
-      // Z-axis is dominant
-      if (faceNormal.z > 0) {
-        lastClickedFace = "front"; // +Z face
-      } else {
-        lastClickedFace = "back"; // -Z face
-      }
+      console.log("Material not found in mapping");
     }
-    if (colorSelect) {
-      console.log(intersects[0].object.material);
-      
-      // console.log(intersects[0].object);
-      intersects[0].object.material.forEach(element => {
-        // console.log(element, lastClickedFace,allCubies);
-        // console.log(hexToRGB(colorSelect[0]), cubeString);
-
-        let rgb = hexToRGB(colorSelect[0]);
-        // element.wireframe = true;
-        // element.color.r = 255/25;
-        // element.color.g = 153/25;
-        // element.color.b = 153/25;
-        let a = 100;
-        element.color.r = rgb.r/a;
-        element.color.g = rgb.g/a;
-        element.color.b = rgb.b/a;
-        
-        
-      });
-      // intersects[0].object.material.color.set(THREE.RED_GREEN_RGTC2_Format);
-      // intersects[0].object.material.position = new THREE.Vector3(6969, 0, 0);
-      return;
-    }
-    isDragging = true; // for pallet mode set to false.
+    
+    isDragging = true;
     currentRotation = 0;
     updateBloomHighlight();
   }
 }
 
+// Function to create a mapping between materials and cubeString indices
+function createMaterialMapping(cubeGroup) {
+  const materialMap = new Map();
+  
+  // Standard order of faces in cubeString: U, R, F, D, L, B
+  const faceToLetter = {
+    "top": "U",
+    "right": "R",
+    "front": "F",
+    "bottom": "D",
+    "left": "L",
+    "back": "B"
+  };
+  
+  // Start indices for each face in the cubeString
+  const faceIndices = {
+    "U": 0,
+    "R": 9,
+    "F": 18,
+    "D": 27,
+    "L": 36,
+    "B": 45
+  };
 
+  // Process each cubie
+  let facelets = [];
+  cubeGroup.traverse((object) => {
+    if (object instanceof THREE.Mesh && object.userData.isCubie) {
+      if (Array.isArray(object.material)) {
+        // For each material (facelet) on this cubie
+        object.material.forEach((material, matIndex) => {
+          if (!material.userData) material.userData = {};
+          material.userData.cubie = object;
+          material.userData.faceIndex = matIndex;
+          facelets.push(material);
+        });
+      }
+    }
+  });
+  
+  // Now organize facelets by their global position
+  for (let i = 0; i < facelets.length; i++) {
+    const material = facelets[i];
+    const cubie = material.userData.cubie;
+    const localFaceIndex = material.userData.faceIndex;
+    
+    // Get cubie position in grid coordinates
+    const position = cubie.position.clone();
+    const gridX = Math.round(position.x);
+    const gridY = Math.round(position.y);
+    const gridZ = Math.round(position.z);
+    
+    // Determine which face this facelet belongs to
+    let face;
+    let positionInFace;
+    
+    // We need to determine which face this facelet is on based on the material index and cubie position
+    // This is a simplified example and may need adjustment for your specific cube structure
+    switch (localFaceIndex) {
+      case 0: // +X face
+        face = "right";
+        positionInFace = (1 - gridY) * 3 + (1 - gridZ); // Convert to 0-8 index
+        break;
+      case 1: // -X face
+        face = "left";
+        positionInFace = (1 - gridY) * 3 + (1 + gridZ);
+        break;
+      case 2: // +Y face
+        face = "top";
+        positionInFace = (1 - gridZ) * 3 + (1 + gridX);
+        break;
+      case 3: // -Y face
+        face = "bottom";
+        positionInFace = (1 + gridZ) * 3 + (1 + gridX);
+        break;
+      case 4: // +Z face
+        face = "front";
+        positionInFace = (1 - gridY) * 3 + (1 + gridX);
+        break;
+      case 5: // -Z face
+        face = "back";
+        positionInFace = (1 - gridY) * 3 + (1 - gridX);
+        break;
+    }
+    
+    // Make sure the position is within bounds
+    positionInFace = Math.max(0, Math.min(8, positionInFace));
+    
+    // Get the letter for this face
+    const faceLetter = faceToLetter[face];
+    
+    // Calculate the index in the cubeString
+    if (faceLetter) {
+      const startIndex = faceIndices[faceLetter];
+      const stringIndex = startIndex + positionInFace;
+      
+      // Store in the map
+      materialMap.set(material.uuid, stringIndex);
+    }
+  }
+  
+  return materialMap;
+}
+
+// Map color hex to cubeString letter (customize this based on your color scheme)
+function mapColorToLetter(hexColor) {
+  const colorMap = {
+    "#FFFFFF": "U", // White for Up
+    "#FF0000": "R", // Red for Right
+    "#00FF00": "F", // Green for Front
+    "#FFFF00": "D", // Yellow for Down
+    "#FF8000": "L", // Orange for Left
+    "#0000FF": "B"  // Blue for Back
+  };
+  
+  return colorMap[hexColor] || null;
+}
+// Helper function to determine position within a face (0-8) based on cubie position
+function getPositionInFace(cubiePosition, face) {
+  // Convert cubie position to grid coordinates (0,1,2) for each axis
+  // Assuming cube is centered at origin and has size 3 units
+  const gridX = Math.round(cubiePosition.x) + 1; // -1,0,1 → 0,1,2
+  const gridY = Math.round(cubiePosition.y) + 1; // -1,0,1 → 0,1,2
+  const gridZ = Math.round(cubiePosition.z) + 1; // -1,0,1 → 0,1,2
+  
+  // Map grid coordinates to face position (0-8)
+  switch (face) {
+    case "top": // U - Looking down at top face
+      return (2 - gridZ) * 3 + gridX; // Top left is (0,1,-1) → position 0
+    case "bottom": // D - Looking up at bottom face
+      return gridZ * 3 + gridX; // Bottom left is (0,-1,-1) → position 0
+    case "left": // L - Looking at left face
+      return (2 - gridY) * 3 + gridZ; // Top left is (-1,1,-1) → position 0
+    case "right": // R - Looking at right face
+      return (2 - gridY) * 3 + (2 - gridZ); // Top left is (1,1,1) → position 0
+    case "front": // F - Looking at front face
+      return (2 - gridY) * 3 + gridX; // Top left is (0,1,1) → position 0
+    case "back": // B - Looking at back face
+      return (2 - gridY) * 3 + (2 - gridX); // Top left is (0,1,-1) → position 0
+    default:
+      return 0;
+  }
+}
+
+// Map color hex to cubeString letter
+function mapColorToLetter(hexColor) {
+  // Define mappings from hex colors to letters
+  // This needs to be customized for your specific color scheme
+  const colorMap = {
+    "#FFFFFF": "U", // White for Up
+    "#FF0000": "R", // Red for Right
+    "#00FF00": "F", // Green for Front
+    "#FFFF00": "D", // Yellow for Down
+    "#FF8000": "L", // Orange for Left
+    "#0000FF": "B"  // Blue for Back
+  };
+  
+  return colorMap[hexColor] || null;
+}
 
 function hexToRGB(hex) {
   // Remove # if present
