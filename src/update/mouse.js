@@ -41,10 +41,6 @@ export function onPointerDown(
 
   raycaster.setFromCamera(mouse, camera);
 
-  // Instead of collecting cubies, let's create a direct mapping of materials to positions
-  // This only needs to be done once and could be moved outside this function for better performance
-  const materialToIndexMap = createMaterialMapping(cubeGroup);
-
   const intersects = raycaster.intersectObjects(cubeGroup.children, true);
   
   if (intersects.length > 0) {
@@ -57,7 +53,7 @@ export function onPointerDown(
     const faceNormal = intersects[0].face.normal.clone();
     faceNormal.transformDirection(selectedCubie.matrixWorld);
 
-    // Determine the clicked face normal as before
+    // Determine the clicked face normal
     const absX = Math.abs(faceNormal.x);
     const absY = Math.abs(faceNormal.y);
     const absZ = Math.abs(faceNormal.z);
@@ -75,34 +71,15 @@ export function onPointerDown(
     const clickedMaterial = Array.isArray(selectedCubie.material) ? 
       selectedCubie.material[materialIndex] : selectedCubie.material;
     
-    // Find the cubeString index for this specific material
-    const stringIndex = materialToIndexMap.get(clickedMaterial.uuid);
-    
-    if (stringIndex !== undefined) {
-      console.log(`Clicked on facelet at cubeString index ${stringIndex}`);
-      console.log(`Current color at this position: ${cubeString[stringIndex]}`);
-      
-      if (colorSelect) {
-        // Apply color to the clicked material
-        let rgb = hexToRGB(colorSelect[0]);
-        let a = 100;
-        
-        // Update just the clicked material's color
-        clickedMaterial.color.r = rgb.r/a;
-        clickedMaterial.color.g = rgb.g/a;
-        clickedMaterial.color.b = rgb.b/a;
-        
-        // Update the cubeString
-        const newColorLetter = mapColorToLetter(colorSelect[0]);
-        if (newColorLetter) {
-          cubeString = cubeString.substring(0, stringIndex) + newColorLetter + cubeString.substring(stringIndex + 1);
-          console.log(`Updated cubeString: ${cubeString}`);
-        }
-        
-        return;
+    // If in paint mode, color the facelet and return early
+    if (colorSelect && colorSelect[0] !== undefined) {
+      console.log(`Painting facelet to color hex: #${colorSelect[0].toString(16)}`);
+      clickedMaterial.color.set(colorSelect[0]);
+      window.hasPainted = true;
+      if (window.saveCubeStateToStorage) {
+        window.saveCubeStateToStorage();
       }
-    } else {
-      console.log("Material not found in mapping");
+      return;
     }
     
     isDragging = true;
@@ -157,18 +134,16 @@ function createMaterialMapping(cubeGroup) {
     const cubie = material.userData.cubie;
     const localFaceIndex = material.userData.faceIndex;
     
-    // Get cubie position in grid coordinates
+    // Get cubie position in grid coordinates (-1, 0, 1) by dividing by 0.21
     const position = cubie.position.clone();
-    const gridX = Math.round(position.x);
-    const gridY = Math.round(position.y);
-    const gridZ = Math.round(position.z);
+    const gridX = Math.round(position.x / 0.21);
+    const gridY = Math.round(position.y / 0.21);
+    const gridZ = Math.round(position.z / 0.21);
     
     // Determine which face this facelet belongs to
     let face;
     let positionInFace;
     
-    // We need to determine which face this facelet is on based on the material index and cubie position
-    // This is a simplified example and may need adjustment for your specific cube structure
     switch (localFaceIndex) {
       case 0: // +X face
         face = "right";
@@ -215,26 +190,13 @@ function createMaterialMapping(cubeGroup) {
   return materialMap;
 }
 
-// Map color hex to cubeString letter (customize this based on your color scheme)
-function mapColorToLetter(hexColor) {
-  const colorMap = {
-    "#FFFFFF": "U", // White for Up
-    "#FF0000": "R", // Red for Right
-    "#00FF00": "F", // Green for Front
-    "#FFFF00": "D", // Yellow for Down
-    "#FF8000": "L", // Orange for Left
-    "#0000FF": "B"  // Blue for Back
-  };
-  
-  return colorMap[hexColor] || null;
-}
 // Helper function to determine position within a face (0-8) based on cubie position
 function getPositionInFace(cubiePosition, face) {
   // Convert cubie position to grid coordinates (0,1,2) for each axis
-  // Assuming cube is centered at origin and has size 3 units
-  const gridX = Math.round(cubiePosition.x) + 1; // -1,0,1 → 0,1,2
-  const gridY = Math.round(cubiePosition.y) + 1; // -1,0,1 → 0,1,2
-  const gridZ = Math.round(cubiePosition.z) + 1; // -1,0,1 → 0,1,2
+  // Assuming cube is centered at origin and has size 3 units, cubie step size is 0.21
+  const gridX = Math.round(cubiePosition.x / 0.21) + 1; // -1,0,1 → 0,1,2
+  const gridY = Math.round(cubiePosition.y / 0.21) + 1; // -1,0,1 → 0,1,2
+  const gridZ = Math.round(cubiePosition.z / 0.21) + 1; // -1,0,1 → 0,1,2
   
   // Map grid coordinates to face position (0-8)
   switch (face) {
@@ -253,22 +215,6 @@ function getPositionInFace(cubiePosition, face) {
     default:
       return 0;
   }
-}
-
-// Map color hex to cubeString letter
-function mapColorToLetter(hexColor) {
-  // Define mappings from hex colors to letters
-  // This needs to be customized for your specific color scheme
-  const colorMap = {
-    "#FFFFFF": "U", // White for Up
-    "#FF0000": "R", // Red for Right
-    "#00FF00": "F", // Green for Front
-    "#FFFF00": "D", // Yellow for Down
-    "#FF8000": "L", // Orange for Left
-    "#0000FF": "B"  // Blue for Back
-  };
-  
-  return colorMap[hexColor] || null;
 }
 
 function hexToRGB(hex) {
@@ -488,6 +434,10 @@ export function onPointerUp(
     const quarterTurns = Math.round(accumulatedRotation / (Math.PI / 2));
     const remainingAngle = (quarterTurns * Math.PI) / 2 - accumulatedRotation;
 
+    // Capture references locally to prevent async null pointer crashes if globals are reset
+    const animTempLayer = activeTempLayer;
+    const animRotationAxis = activeRotationAxis;
+
     // Check if we're close enough to a quarter turn to snap
     if (Math.abs(accumulatedRotation) >= snapThreshold) {
       // Animate to the nearest quarter turn
@@ -499,6 +449,7 @@ export function onPointerUp(
       isAnimating = true;
 
       function snapAnimation() {
+        if (!animTempLayer) return;
         const elapsed = performance.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
 
@@ -510,8 +461,8 @@ export function onPointerUp(
           startRotation + (targetRotation - startRotation) * easeProgress;
 
         // Apply rotation
-        activeTempLayer.setRotationFromAxisAngle(
-          activeRotationAxis,
+        animTempLayer.setRotationFromAxisAngle(
+          animRotationAxis,
           currentAngle
         );
 
@@ -519,10 +470,9 @@ export function onPointerUp(
           requestAnimationFrame(snapAnimation);
         } else {
           // Complete the rotation and update cube state
-
           completeRotation(
-            activeTempLayer,
-            activeRotationAxis,
+            animTempLayer,
+            animRotationAxis,
             targetRotation,
             cubiesContainer,
             cubeGroup,
@@ -536,16 +486,12 @@ export function onPointerUp(
           accumulatedRotation = 0;
           isAnimating = false;
 
-          // Add the move to history
-          // const layerNames = ["L", "M", "R", "D", "E", "U", "B", "S", "F"];
-          // console.log(quarterTurns)
-          // const direction = quarterTurns === 1 ? "" : quarterTurns === 2 ? "2" : "'";
-          // const moveName = layerNames[layerIndex] + direction;
           const moveName = getMoveName(layerIndex, quarterTurns);
-          console.log(moveName);
-          moveHistory.push(moveName);
-
-          updateMoveHistory(historyDiv, moveHistory);
+          if (moveName) {
+            console.log(moveName);
+            moveHistory.push(moveName);
+            updateMoveHistory(historyDiv, moveHistory);
+          }
         }
       }
 
@@ -560,6 +506,7 @@ export function onPointerUp(
       isAnimating = true;
 
       function resetAnimation() {
+        if (!animTempLayer) return;
         const elapsed = performance.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
 
@@ -571,8 +518,8 @@ export function onPointerUp(
           startRotation + (targetRotation - startRotation) * easeProgress;
 
         // Apply rotation
-        activeTempLayer.setRotationFromAxisAngle(
-          activeRotationAxis,
+        animTempLayer.setRotationFromAxisAngle(
+          animRotationAxis,
           currentAngle
         );
 
@@ -580,14 +527,14 @@ export function onPointerUp(
           requestAnimationFrame(resetAnimation);
         } else {
           // Return cubies to original positions
-          activeTempLayer.children.slice().forEach((cubie) => {
+          animTempLayer.children.slice().forEach((cubie) => {
             if (cubie.userData.originalParent) {
-              activeTempLayer.remove(cubie);
+              animTempLayer.remove(cubie);
               cubie.userData.originalParent.add(cubie);
             }
           });
 
-          cubeGroup.remove(activeTempLayer);
+          cubeGroup.remove(animTempLayer);
 
           // Reset drag state
           dragActive = false;
@@ -692,9 +639,10 @@ export function rotateLayer(
     const moveName = layerNames[layerIndex] + (direction < 0 ? "'" : "");
 
     // Add to history
-    moveHistory.push(moveName);
-
-    updateMoveHistory(historyDiv, moveHistory);
+    if (!window.isSolving) {
+      moveHistory.push(moveName);
+      updateMoveHistory(historyDiv, moveHistory);
+    }
 
     // Determine rotation axis
     let axis = new THREE.Vector3();
@@ -866,6 +814,10 @@ function completeRotation(
 
   // Rebuild all layer references
   rebuildLayerReferences(layers, cubiesContainer);
+
+  if (window.saveCubeStateToStorage && !window.isSolving) {
+    window.saveCubeStateToStorage();
+  }
 }
 
 function rebuildLayerReferences(layers, cubiesContainer) {

@@ -19,23 +19,23 @@
   solve = function (args) {
     var cube;
     if (!initialized) {
-      return;
+      throw new Error("Solver not initialized");
     }
     if (args.scramble) {
       cube = new Cube();
       cube.move(args.scramble);
     } else if (args.cube) {
       cube = new Cube(args.cube);
+    } else {
+      throw new Error("No cube state provided to solver");
     }
     console.log(args);
-    if (args.solveN)
-    {
-        console.log("solving with", args.solveN);
-        return cube.solve(args.solveN);
+    if (args.solveN) {
+      console.log("solving with", args.solveN);
+      return cube.solve(args.solveN);
     } else {
-    return cube.solve();
+      return cube.solve();
     }
-    
   };
 
   self.onmessage = function (event) {
@@ -43,16 +43,34 @@
     args = event.data;
     switch (args.cmd) {
       case "init":
-        init();
-        return self.postMessage({
-          cmd: "init",
-          status: "ok",
-        });
+        try {
+          init();
+          return self.postMessage({
+            cmd: "init",
+            status: "ok",
+          });
+        } catch (error) {
+          return self.postMessage({
+            cmd: "init",
+            status: "error",
+            error: error.message
+          });
+        }
       case "solve":
-        return self.postMessage({
-          cmd: "solve",
-          algorithm: solve(args)
-        });
+        try {
+          var algorithm = solve(args);
+          return self.postMessage({
+            cmd: "solve",
+            status: "ok",
+            algorithm: algorithm
+          });
+        } catch (error) {
+          return self.postMessage({
+            cmd: "solve",
+            status: "error",
+            error: error.message
+          });
+        }
     }
   };
 }).call(this);

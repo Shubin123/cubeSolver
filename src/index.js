@@ -29,10 +29,10 @@ const GAP = 0.01; // Gap between cubies
 // Colors for cube faces
 const COLORS = {
   WHITE: 0xffffff, // Light pastel blue (UP)
-  RED: 0xff9999, // Light red (RIGHT)
-  BLUE: 0x66666ff, // Light blue (FRONT)
-  ORANGE: 0xffcc99, // Light orange (normalized)
-  GREEN: 0x99ff99, // Light green (normalized)
+  RED: 0x6666ff, // Light blue (RIGHT)
+  BLUE: 0xff9999, // Light red (FRONT)
+  ORANGE: 0x99ff99, // Light green (Left)
+  GREEN: 0xffcc99, // Light orange (Back)
   YELLOW: 0xffff99, // Light yellow (normalized)
   BLACK: 0x777777, // Light gray (normalized, not pure black)
 };
@@ -68,6 +68,13 @@ let rotateButton;
 let historyDiv;
 let colorSelect;
 
+let alertOverlay;
+let alertTitleElement;
+let alertBodyElement;
+let alertCloseButton;
+
+window.hasPainted = false;
+
 
 // Initialize everything
 init();
@@ -98,9 +105,13 @@ function init() {
   let raycaster = new THREE.Raycaster();
   let mouse = new THREE.Vector2();
 
-  // Add event listeners
-  window.addEventListener("resize", onWindowResize);
-  window.addEventListener("pointerdown", (event) => {
+  // Remove existing listeners first to prevent duplicates (important for HMR/refresh)
+  if (window._onPointerDown) window.removeEventListener("pointerdown", window._onPointerDown);
+  if (window._onPointerMove) window.removeEventListener("pointermove", window._onPointerMove);
+  if (window._onPointerUp) window.removeEventListener("pointerup", window._onPointerUp);
+  if (window._onResize) window.removeEventListener("resize", window._onResize);
+
+  window._onPointerDown = (event) => {
     onPointerDown(
       event,
       raycaster,
@@ -113,8 +124,8 @@ function init() {
       cubeString,
       colorSelect
     );
-  });
-  window.addEventListener("pointermove", (event) => {
+  };
+  window._onPointerMove = (event) => {
     onPointerMove(
       event,
       raycaster,
@@ -129,8 +140,8 @@ function init() {
       cubiesContainer,
       scene
     );
-  });
-  window.addEventListener("pointerup", (event) => {
+  };
+  window._onPointerUp = (event) => {
     onPointerUp(
       controls,
       historyDiv,
@@ -140,7 +151,14 @@ function init() {
       cubiesContainer,
       layers
     );
-  });
+  };
+  window._onResize = onWindowResize;
+
+  // Add event listeners
+  window.addEventListener("resize", window._onResize);
+  window.addEventListener("pointerdown", window._onPointerDown);
+  window.addEventListener("pointermove", window._onPointerMove);
+  window.addEventListener("pointerup", window._onPointerUp);
 }
 
 function setupCamera() {
@@ -234,156 +252,221 @@ function createFaceMaterial(color) {
   });
 }
 
-function setupUI(dl1, dl2) {
+function setupAlert() {
+  alertOverlay = document.createElement("div");
+  alertOverlay.className = "alert-overlay";
   
-{
+  const dialog = document.createElement("div");
+  dialog.className = "alert-dialog";
+  
+  const icon = document.createElement("div");
+  icon.className = "alert-icon";
+  icon.textContent = "⚠️";
+  
+  alertTitleElement = document.createElement("div");
+  alertTitleElement.className = "alert-title";
+  
+  alertBodyElement = document.createElement("div");
+  alertBodyElement.className = "alert-body";
+  
+  alertCloseButton = document.createElement("button");
+  alertCloseButton.className = "alert-btn";
+  alertCloseButton.textContent = "Dismiss";
+  alertCloseButton.addEventListener("click", () => {
+    alertOverlay.classList.remove("show");
+  });
+  
+  dialog.appendChild(icon);
+  dialog.appendChild(alertTitleElement);
+  dialog.appendChild(alertBodyElement);
+  dialog.appendChild(alertCloseButton);
+  alertOverlay.appendChild(dialog);
+  document.body.appendChild(alertOverlay);
+}
+
+function showAlert(title, body, isSuccess = false) {
+  alertTitleElement.textContent = title;
+  alertBodyElement.textContent = body;
+  
+  const dialog = alertOverlay.querySelector(".alert-dialog");
+  const icon = alertOverlay.querySelector(".alert-icon");
+  
+  if (isSuccess) {
+    dialog.classList.add("success");
+    icon.textContent = "🎉";
+    alertCloseButton.textContent = "Awesome";
+  } else {
+    dialog.classList.remove("success");
+    icon.textContent = "⚠️";
+    alertCloseButton.textContent = "Dismiss";
+  }
+  
+  alertOverlay.classList.add("show");
+}
+
+function setupUI(dl1, dl2) {
+  // Main Panel
   const uiContainer = document.createElement("div");
-  uiContainer.style.position = "absolute";
-  uiContainer.style.top = "10px";
-  uiContainer.style.left = "10px";
-  uiContainer.style.padding = "10px";
-  uiContainer.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-  uiContainer.style.borderRadius = "5px";
-  uiContainer.style.color = "white";
-  uiContainer.style.display = "none"; // Initially hidden
+  uiContainer.className = "ui-panel";
   document.body.appendChild(uiContainer);
 
-  // Create hamburger menu button
+  // Hamburger menu button
   const hamburgerMenuButton = document.createElement("button");
+  hamburgerMenuButton.className = "menu-toggle";
   hamburgerMenuButton.textContent = "☰";
-  hamburgerMenuButton.style.position = "absolute";
-  hamburgerMenuButton.style.top = "10px";
-  hamburgerMenuButton.style.left = "10px";
-  hamburgerMenuButton.style.padding = "10px";
-  hamburgerMenuButton.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-  hamburgerMenuButton.style.color = "white";
-  hamburgerMenuButton.style.border = "none";
-  hamburgerMenuButton.style.cursor = "pointer";
-  hamburgerMenuButton.style.fontSize = "50px";
   document.body.appendChild(hamburgerMenuButton);
 
-  // Toggle menu visibility when hamburger button is clicked
   hamburgerMenuButton.addEventListener("click", () => {
-    uiContainer.style.display = uiContainer.style.display === "none" ? "block" : "none";
+    uiContainer.classList.toggle("show");
   });
 
   // Title
   const title = document.createElement("h2");
   title.textContent = "Rubik's Cube Solver";
-  title.style.margin = "0 0 10px 0";
-  title.style.textAlign = "center";
   uiContainer.appendChild(title);
 
-  // Buttons
+  // Buttons Container
+  const btnGroup = document.createElement("div");
+  btnGroup.className = "btn-group";
+  uiContainer.appendChild(btnGroup);
+
+  const row1 = document.createElement("div");
+  row1.className = "btn-row";
+  btnGroup.appendChild(row1);
+
   scrambleButton = document.createElement("button");
+  scrambleButton.id = "btn-scramble";
   scrambleButton.textContent = "Scramble";
-  scrambleButton.style.marginRight = "5px";
-  scrambleButton.style.padding = "5px 10px";
   scrambleButton.addEventListener("click", scrambleCube);
-  uiContainer.appendChild(scrambleButton);
+  row1.appendChild(scrambleButton);
 
   solveButton = document.createElement("button");
+  solveButton.id = "btn-solve";
   solveButton.textContent = "Solve";
-  solveButton.style.marginRight = "5px";
-  solveButton.style.padding = "5px 10px";
-  solveButton.addEventListener("click", solveCubeHistoric);
-  uiContainer.appendChild(solveButton);
+  solveButton.addEventListener("click", solveCube);
+  row1.appendChild(solveButton);
+
+  const row2 = document.createElement("div");
+  row2.className = "btn-row";
+  btnGroup.appendChild(row2);
 
   resetButton = document.createElement("button");
   resetButton.textContent = "Reset";
-  resetButton.style.padding = "5px 10px";
   resetButton.addEventListener("click", resetCube);
-  uiContainer.appendChild(resetButton);
+  row2.appendChild(resetButton);
 
   extraBloomButton = document.createElement("button");
-  extraBloomButton.textContent = "TOOMUCH bloom";
-  extraBloomButton.style.marginLeft = "5px";
-  extraBloomButton.style.padding = "5px 10px";
+  extraBloomButton.textContent = "Extra Bloom";
   extraBloomButton.addEventListener("click", () => {
     extraBloomCallback(composer, dl1, dl2);
   });
-  uiContainer.appendChild(extraBloomButton);
+  row2.appendChild(extraBloomButton);
 
   rotateButton = document.createElement("button");
-  rotateButton.textContent = "Rotate";
-  rotateButton.style.marginLeft = "5px";
-  rotateButton.style.padding = "5px 10px";
+  rotateButton.textContent = "Auto Rotate";
   rotateButton.addEventListener("click", () => {
     controls.autoRotate = !controls.autoRotate;
   });
-  uiContainer.appendChild(rotateButton);
+  btnGroup.appendChild(rotateButton);
 
   // Move history section
-  const historyTitle = document.createElement("h3");
-  historyTitle.textContent = "Move History:";
-  historyTitle.style.margin = "10px 0 5px 0";
+  const historyTitle = document.createElement("div");
+  historyTitle.className = "section-title";
+  historyTitle.textContent = "Move History";
   uiContainer.appendChild(historyTitle);
 
   historyDiv = document.createElement("div");
-  historyDiv.style.maxHeight = "200px";
-  historyDiv.style.overflowY = "auto";
-  historyDiv.style.fontFamily = "monospace";
+  historyDiv.className = "history-box";
   uiContainer.appendChild(historyDiv);
 
   // Controls info
-  const controlsTitle = document.createElement("h3");
-  controlsTitle.textContent = "Controls:";
-  controlsTitle.style.margin = "10px 0 5px 0";
+  const controlsTitle = document.createElement("div");
+  controlsTitle.className = "section-title";
+  controlsTitle.textContent = "Controls";
   uiContainer.appendChild(controlsTitle);
 
   const controlsText = document.createElement("div");
+  controlsText.className = "controls-info";
   controlsText.innerHTML = `
-        <p>Click and drag on a face to rotate it</p>
-        <p>Use mouse wheel or pinch to zoom</p>
-        <p>shift-click and pan the view</p>
+        <p>• Click and drag on a face to rotate it</p>
+        <p>• Select a color to enter Paint Mode</p>
+        <p>• Drag background to orbit view</p>
+        <p>• Use mouse wheel to zoom</p>
+        <p>• Shift-click to pan the view</p>
     `;
   uiContainer.appendChild(controlsText);
+
+  // Setup other custom widgets
+  setupColorPicker();
+  setupAlert();
 }
 
-const paletteContainer = document.createElement("div");
-paletteContainer.style.position = "absolute";
-paletteContainer.style.top = "50px";
-paletteContainer.style.left = "10px";
-// paletteContainer.style.padding = "10px";
-// paletteContainer.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-paletteContainer.style.borderRadius = "5px";
-paletteContainer.style.color = "white";
-paletteContainer.style.display = "flex";
-paletteContainer.style.flexDirection = "column";  // Arrange buttons vertically
-paletteContainer.style.scale = "1";
-
-paletteContainer.style.translate = "30rem 10rem";
-// paletteContainer.style.alignContent = "center";
-
-document.body.appendChild(paletteContainer);
-
-// Loop through the COLORS object to create buttons for each color
-Object.keys(COLORS).forEach((colorName) => {
-  const colorButton = document.createElement("button");
-  colorButton.style.margin = "5px 0";  // Add vertical spacing between buttons
-  colorButton.style.padding = "20px";  // Size of the button
-  colorButton.style.backgroundColor = `#${COLORS[colorName].toString(16)}`;
-  colorButton.style.color = "white";
-  colorButton.style.border = "none";
-  colorButton.style.cursor = "pointer";
-
-  // Event listener to set the selected color
-  colorButton.addEventListener("click", () => {
-    // Here we set the color on the currently selected face (this part is custom and can be linked to a 3D model or a UI state)
-    console.log(`Selected color: ${colorName}`);
-    // You can modify this code to apply the color to the cube face in your UI or logic
-    selectedColor(COLORS[colorName]);
-  });
-
-  paletteContainer.appendChild(colorButton);
+function setupColorPicker() {
+  const widget = document.createElement("div");
+  widget.className = "color-picker-widget";
   
-});
-
-}
-
-function selectedColor(colorValue, colorName) {
-  // Implement this function to modify the cube's face or visual representation
-  colorSelect = [colorValue,colorName];  
+  const title = document.createElement("div");
+  title.className = "picker-title";
+  title.textContent = "Paint Tool";
+  widget.appendChild(title);
+  
+  const palette = document.createElement("div");
+  palette.className = "color-palette";
+  widget.appendChild(palette);
+  
+  const statusBadge = document.createElement("div");
+  statusBadge.className = "status-badge";
+  statusBadge.textContent = "Mode: Rotate";
+  widget.appendChild(statusBadge);
+  
+  const rotateModeBtn = document.createElement("button");
+  rotateModeBtn.className = "btn-rotate-mode active";
+  rotateModeBtn.innerHTML = "🔄 Rotate Mode";
+  widget.appendChild(rotateModeBtn);
+  
+  const colorButtons = [];
+  
+  const validColors = {
+    WHITE: COLORS.WHITE,
+    RED: COLORS.BLUE,
+    BLUE: COLORS.RED,
+    ORANGE: COLORS.GREEN,
+    GREEN: COLORS.ORANGE,
+    YELLOW: COLORS.YELLOW
+  };
+  
+  Object.keys(validColors).forEach((colorName) => {
+    const colorBtn = document.createElement("button");
+    colorBtn.className = "color-btn";
+    colorBtn.style.color = `#${validColors[colorName].toString(16).padStart(6, '0')}`;
+    colorBtn.style.backgroundColor = `#${validColors[colorName].toString(16).padStart(6, '0')}`;
+    colorBtn.title = `Paint ${colorName}`;
+    
+    colorBtn.addEventListener("click", () => {
+      rotateModeBtn.classList.remove("active");
+      colorButtons.forEach(btn => btn.classList.remove("active"));
+      colorBtn.classList.add("active");
+      
+      colorSelect = [validColors[colorName], colorName];
+      
+      statusBadge.className = "status-badge paint";
+      statusBadge.textContent = `Paint: ${colorName}`;
+    });
+    
+    palette.appendChild(colorBtn);
+    colorButtons.push(colorBtn);
+  });
+  
+  rotateModeBtn.addEventListener("click", () => {
+    rotateModeBtn.classList.add("active");
+    colorButtons.forEach(btn => btn.classList.remove("active"));
+    colorSelect = null;
+    
+    statusBadge.className = "status-badge";
+    statusBadge.textContent = "Mode: Rotate";
+  });
+  
+  document.body.appendChild(widget);
 }
 
 function createRubiksCube() {
@@ -516,11 +599,12 @@ function createCubie(x, y, z) {
 
 function scrambleCube() {
   if (isAnimating || isSolving) return;
+  window.hasPainted = false;
   glitchPass = new GlitchPass(1);
   composer.addPass(glitchPass);
 
   // Reset history
-
+  moveHistory = [];
   updateMoveHistory(historyDiv, moveHistory);
 
   const moves = 10;
@@ -554,86 +638,275 @@ function scrambleCube() {
       doNextMove();
     }, 600);
   }
+}
 
-  doNextMove();
+function calculateGridPosition(cubie) {
+  const pos = new THREE.Vector3();
+  pos.copy(cubie.position);
+  const offset = 0.21; // offset = ((3 - 1) / 2) * 0.21 = 0.21
+  
+  pos.x = Math.round((pos.x + offset) / 0.21);
+  pos.y = Math.round((pos.y + offset) / 0.21);
+  pos.z = Math.round((pos.z + offset) / 0.21);
+  
+  pos.x = Math.max(0, Math.min(2, pos.x));
+  pos.y = Math.max(0, Math.min(2, pos.y));
+  pos.z = Math.max(0, Math.min(2, pos.z));
+  
+  return pos;
+}
+
+function getCubieAt(gx, gy, gz) {
+  for (let i = 0; i < cubiesContainer.children.length; i++) {
+    const cubie = cubiesContainer.children[i];
+    if (cubie.userData && cubie.userData.isCubie) {
+      const pos = calculateGridPosition(cubie);
+      if (pos.x === gx && pos.y === gy && pos.z === gz) {
+        return cubie;
+      }
+    }
+  }
+  return null;
+}
+
+function getFaceletColor(cubie, worldDirection) {
+  if (!cubie) return null;
+  const localDirections = [
+    new THREE.Vector3(1, 0, 0),  // 0: Right (+X)
+    new THREE.Vector3(-1, 0, 0), // 1: Left (-X)
+    new THREE.Vector3(0, 1, 0),  // 2: Top (+Y)
+    new THREE.Vector3(0, -1, 0), // 3: Bottom (-Y)
+    new THREE.Vector3(0, 0, 1),  // 4: Front (+Z)
+    new THREE.Vector3(0, 0, -1)  // 5: Back (-Z)
+  ];
+  
+  for (let i = 0; i < 6; i++) {
+    const dir = localDirections[i].clone().applyQuaternion(cubie.quaternion);
+    if (dir.dot(worldDirection) > 0.9) {
+      return Array.isArray(cubie.material) ? cubie.material[i] : cubie.material;
+    }
+  }
+  return null;
+}
+
+function matchColorToLetter(color) {
+  const matchColors = {
+    "U": COLORS.WHITE,
+    "R": COLORS.RED,
+    "F": COLORS.BLUE,
+    "D": COLORS.YELLOW,
+    "L": COLORS.ORANGE,
+    "B": COLORS.GREEN
+  };
+  
+  let bestMatch = null;
+  let minDiff = Infinity;
+  const tempColor = new THREE.Color();
+  
+  for (const [letter, val] of Object.entries(matchColors)) {
+    tempColor.set(val);
+    const diff = Math.pow(color.r - tempColor.r, 2) +
+                 Math.pow(color.g - tempColor.g, 2) +
+                 Math.pow(color.b - tempColor.b, 2);
+    if (diff < minDiff) {
+      minDiff = diff;
+      bestMatch = letter;
+    }
+  }
+  
+  return bestMatch;
+}
+
+function getCubeStateString() {
+  const faces = [
+    {
+      name: "U",
+      dir: new THREE.Vector3(0, 1, 0),
+      getCoords: (i) => ({
+        gx: i % 3,
+        gy: 2,
+        gz: Math.floor(i / 3)
+      })
+    },
+    {
+      name: "R",
+      dir: new THREE.Vector3(1, 0, 0),
+      getCoords: (i) => ({
+        gx: 2,
+        gy: 2 - Math.floor(i / 3),
+        gz: 2 - (i % 3)
+      })
+    },
+    {
+      name: "F",
+      dir: new THREE.Vector3(0, 0, 1),
+      getCoords: (i) => ({
+        gx: i % 3,
+        gy: 2 - Math.floor(i / 3),
+        gz: 2
+      })
+    },
+    {
+      name: "D",
+      dir: new THREE.Vector3(0, -1, 0),
+      getCoords: (i) => ({
+        gx: i % 3,
+        gy: 0,
+        gz: 2 - Math.floor(i / 3)
+      })
+    },
+    {
+      name: "L",
+      dir: new THREE.Vector3(-1, 0, 0),
+      getCoords: (i) => ({
+        gx: 0,
+        gy: 2 - Math.floor(i / 3),
+        gz: i % 3
+      })
+    },
+    {
+      name: "B",
+      dir: new THREE.Vector3(0, 0, -1),
+      getCoords: (i) => ({
+        gx: 2 - (i % 3),
+        gy: 2 - Math.floor(i / 3),
+        gz: 0
+      })
+    }
+  ];
+  
+  let stateStr = "";
+  
+  for (const face of faces) {
+    for (let i = 0; i < 9; i++) {
+      const { gx, gy, gz } = face.getCoords(i);
+      const cubie = getCubieAt(gx, gy, gz);
+      if (!cubie) {
+        console.error(`Missing cubie at: ${gx}, ${gy}, ${gz}`);
+        stateStr += "?";
+        continue;
+      }
+      const mat = getFaceletColor(cubie, face.dir);
+      if (!mat) {
+        console.error(`Could not find material for: ${gx}, ${gy}, ${gz}`);
+        stateStr += "?";
+        continue;
+      }
+      const letter = matchColorToLetter(mat.color);
+      console.log(`Scan: Face=${face.name}, index=${i}, grid=(${gx},${gy},${gz}), color=(r=${mat.color.r.toFixed(3)},g=${mat.color.g.toFixed(3)},b=${mat.color.b.toFixed(3)}) hex=#${mat.color.getHexString()} -> letter=${letter}`);
+      stateStr += letter;
+    }
+  }
+  
+  return stateStr;
+}
+
+function getInverseMoves(moves) {
+  const inverseMoves = [];
+  for (let i = moves.length - 1; i >= 0; i--) {
+    const move = moves[i];
+    if (move === "") continue;
+    if (move.endsWith("'")) {
+      inverseMoves.push(move.slice(0, -1));
+    } else if (move.endsWith("2")) {
+      inverseMoves.push(move);
+    } else {
+      inverseMoves.push(move + "'");
+    }
+  }
+  return inverseMoves;
 }
 
 async function solveCube() {
-  // if (isAnimating || isSolving || moveHistory.length === 0) return;
+  if (isAnimating || isSolving) return;
   
-  isSolving = true;
-  solveButton.disabled = true;
-  scrambleButton.disabled = true;
-  
-  // Create a new Cube instance for solving
-  // const userCubeState = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB";
-  const userCubeState =    "FURUUUDFRRFLBLDDLLRBBFRRRFLRRRUDDBBULRFRUDFFBLRLLUDDFB";
-  
-  cubeInstance = Cube.fromString(userCubeState);
-  console.log(cubeInstance.toJSON(), cubeInstance.isSolved());
-  
-  // console.log("Fresh cube state:", JSON.stringify(cubeInstance.toJSON()));
-  
-  // Apply all previous moves to reach current state
-  // const cubeState = moveHistory.join(" ");
-  // console.log("Applying scramble:", cubeState);
-  
-  // cubeInstance.move(cubeState);
-  
-
-  console.log("After scramble:",cubeInstance.asString());
-  
-  // Get the solution
-  await Cube._asyncSolve(cubeInstance, null, (algorithm) => {
-    console.log("Received solution:", algorithm);
-
-    // Proceed with animation...
-    let solution = algorithm.split(" ");
-    let fsolution = [];
-    solution.forEach((move) => {
-      if (move.includes("2")) {
-        fsolution.push(move[0], move[0]);
-      } else {
-        fsolution.push(move);
-      }
-    });
+  // Fast Path: If user hasn't custom-painted facelets, solve instantly by reversing moveHistory!
+  if (!window.hasPainted) {
+    const inverseMoves = getInverseMoves(moveHistory);
+    if (inverseMoves.length === 0) {
+      showAlert("Cube Solved", "The cube is already in a solved state!", true);
+      return;
+    }
     
-    // Reset cube instance for animation
+    isSolving = true;
+    solveButton.disabled = true;
+    scrambleButton.disabled = true;
+    
+    // Set starting state on cubeInstance to current scrambled state, and play reverse moves
     cubeInstance = new Cube();
+    cubeInstance.move(moveHistory.join(" "));
     
-    cubeInstance.move(cubeState);
-    
-    // Start animation
     let i = 0;
-    animateSequence(fsolution, i);
-  });
-}
-
-async function solveCubeHistoric() {
-  if (isAnimating || isSolving || moveHistory.length === 0) return;
+    animateSequence(inverseMoves, i);
+    return;
+  }
+  
+  // Custom painted state: Scan 3D model
+  const scannedState = getCubeStateString();
+  console.log("Scanned state:", scannedState);
+  
+  // Basic validation check: 6 colors each have 9 quads
+  const counts = { U: 0, R: 0, F: 0, D: 0, L: 0, B: 0 };
+  for (let i = 0; i < scannedState.length; i++) {
+    const char = scannedState[i];
+    if (counts[char] !== undefined) {
+      counts[char]++;
+    }
+  }
+  
+  const colorNames = {
+    U: "White (Up)",
+    R: "Blue (Right)",
+    F: "Red (Front)",
+    D: "Yellow (Down)",
+    L: "Green (Left)",
+    B: "Orange (Back)"
+  };
+  
+  let invalidCounts = [];
+  for (const [letter, count] of Object.entries(counts)) {
+    if (count !== 9) {
+      invalidCounts.push(`• ${colorNames[letter]}: ${count} (expected 9)`);
+    }
+  }
+  
+  if (invalidCounts.length > 0) {
+    showAlert(
+      "Unfeasible Cube State",
+      `Each of the 6 colors must have exactly 9 facelets. Current counts:\n\n${invalidCounts.join("\n")}\n\nPlease paint the cube correctly before solving.`,
+      false
+    );
+    return;
+  }
   
   isSolving = true;
   solveButton.disabled = true;
   scrambleButton.disabled = true;
   
-  // Create a new Cube instance for solving
-  cubeInstance = new Cube();
-  console.log(cubeInstance.toJSON(), cubeInstance.isSolved());
+  cubeInstance = Cube.fromString(scannedState);
   
-  // console.log("Fresh cube state:", JSON.stringify(cubeInstance.toJSON()));
-  
-  // Apply all previous moves to reach current state
-  const cubeState = moveHistory.join(" ");
-  // console.log("Applying scramble:", cubeState);
-  
-  cubeInstance.move(cubeState);
-  
-
-  // console.log("After scramble:",cubeInstance.asString());
-  
-  // Get the solution
-  await Cube._asyncSolve(cubeInstance, null, (algorithm) => {
+  // Get the solution, passing 22 as solveN to limit depth and prevent infinite worker hangs
+  await Cube._asyncSolve(cubeInstance, 22, (error, algorithm) => {
+    if (error) {
+      console.error("Solver error:", error);
+      showAlert(
+        "Invalid Cube State",
+        `The color combination is mathematically impossible to solve: ${error}\n\nCheck that corner and edge piece color combinations are correct.`,
+        false
+      );
+      isSolving = false;
+      solveButton.disabled = false;
+      scrambleButton.disabled = false;
+      return;
+    }
+    
     console.log("Received solution:", algorithm);
+    
+    if (algorithm === "") {
+      showAlert("Cube Solved", "The cube is already in a solved state!", true);
+      endSequence();
+      return;
+    }
 
     // Proceed with animation...
     let solution = algorithm.split(" ");
@@ -646,10 +919,8 @@ async function solveCubeHistoric() {
       }
     });
     
-    // Reset cube instance for animation
-    cubeInstance = new Cube();
-    
-    cubeInstance.move(cubeState);
+    // Reset cubeInstance starting state to the scanned state for animation
+    cubeInstance = Cube.fromString(scannedState);
     
     // Start animation
     let i = 0;
@@ -688,7 +959,7 @@ function animateSequence(solution, i) {
   const layerName = move.charAt(0);
 
   let direction = move.includes("'") ? 1 : -1;
- if (layerName.includes('B') || layerName.includes('L') || layerName.includes('D')) {
+  if (layerName.includes('B') || layerName.includes('L') || layerName.includes('D')) {
     direction = -direction;  // Invert the direction for these faces
   }
   
@@ -776,6 +1047,7 @@ async function initSolver() {
 
 function resetCube() {
   if (isAnimating || isSolving) return;
+  window.hasPainted = false;
 
   // Reset history
   moveHistory = [];

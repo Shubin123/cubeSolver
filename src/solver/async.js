@@ -41,7 +41,10 @@
       _asyncSolve: function(cube,solveN, callback) {
         this._asyncSetup();
         this._asyncCallback('solve', function(data) {
-          return callback(data.algorithm);
+          if (data.status === 'error') {
+            return callback(data.error, null);
+          }
+          return callback(null, data.algorithm);
         });
         return this._worker.postMessage({
           cmd: 'solve',
