@@ -17,6 +17,7 @@ import {
   onPointerUp,
   rotateLayer,
   updateMoveHistory,
+  completeRotation,
 } from "./update/mouse.js";
 
 import { updateBloomHighlight, extraBloomCallback } from "./update/light.js";
@@ -74,7 +75,396 @@ let alertBodyElement;
 let alertCloseButton;
 
 window.hasPainted = false;
+window.isSolving = false;
 
+let scrubberContainer;
+let scrubberSlider;
+let scrubberLabel;
+let scrubberPlayBtn;
+let scrubberPrevBtn;
+let scrubberNextBtn;
+let scrubberCloseBtn;
+
+let solutionMoves = [];
+let solutionCurrentStep = 0;
+let isPlayingSolution = false;
+let playTimeoutId = null;
+let initialCubeState = null;
+let initialHasPainted = false;
+
+function saveCubeStateToStorage() {
+  localStorage.setItem("hasPainted", window.hasPainted ? "true" : "false");
+  if (window.hasPainted) {
+    const scannedState = getCubeStateString();
+    localStorage.setItem("savedCubeState", scannedState);
+  } else {
+    localStorage.setItem("moveHistory", JSON.stringify(moveHistory));
+  }
+}
+window.saveCubeStateToStorage = saveCubeStateToStorage;
+
+function applyInitialMoves(moves) {
+  const layerMap = {
+    L: 0, M: 1, R: 2, D: 3, E: 4, U: 5, B: 6, S: 7, F: 8
+  };
+  
+  moves.forEach(move => {
+    const layerName = move.charAt(0);
+    let direction = move.includes("'") ? 1 : -1;
+    if (layerName.includes('B') || layerName.includes('L') || layerName.includes('D')) {
+      direction = -direction;
+    }
+    const layerIndex = layerMap[layerName];
+    if (layerIndex === undefined) return;
+    
+    const axis = new THREE.Vector3();
+    if (layerIndex < 3) axis.set(1, 0, 0);
+    else if (layerIndex < 6) axis.set(0, 1, 0);
+    else axis.set(0, 0, 1);
+    
+    const layerCubies = layers[layerIndex].userData.cubieRefs.slice();
+    const tempLayer = new THREE.Group();
+    cubeGroup.add(tempLayer);
+    
+    layerCubies.forEach((cubie) => {
+      cubie.parent.remove(cubie);
+      tempLayer.add(cubie);
+    });
+    
+    const targetAngle = (direction * Math.PI) / 2;
+    
+    completeRotation(
+      tempLayer,
+      axis,
+      targetAngle,
+      cubiesContainer,
+      cubeGroup,
+      layers
+    );
+  });
+}
+
+function applySavedCubeState(stateStr) {
+  const faces = [
+    { name: "U", dir: new THREE.Vector3(0, 1, 0), getCoords: (i) => ({ gx: i % 3, gy: 2, gz: Math.floor(i / 3) }) },
+    { name: "R", dir: new THREE.Vector3(1, 0, 0), getCoords: (i) => ({ gx: 2, gy: 2 - Math.floor(i / 3), gz: 2 - (i % 3) }) },
+    { name: "F", dir: new THREE.Vector3(0, 0, 1), getCoords: (i) => ({ gx: i % 3, gy: 2 - Math.floor(i / 3), gz: 2 }) },
+    { name: "D", dir: new THREE.Vector3(0, -1, 0), getCoords: (i) => ({ gx: i % 3, gy: 0, gz: 2 - Math.floor(i / 3) }) },
+    { name: "L", dir: new THREE.Vector3(-1, 0, 0), getCoords: (i) => ({ gx: 0, gy: 2 - Math.floor(i / 3), gz: i % 3 }) },
+    { name: "B", dir: new THREE.Vector3(0, 0, -1), getCoords: (i) => ({ gx: 2 - (i % 3), gy: 2 - Math.floor(i / 3), gz: 0 }) }
+  ];
+  
+  const charToColor = {
+    U: COLORS.WHITE,
+    R: COLORS.RED,
+    F: COLORS.BLUE,
+    D: COLORS.YELLOW,
+    L: COLORS.ORANGE,
+    B: COLORS.GREEN
+  };
+  
+  let charIdx = 0;
+  for (const face of faces) {
+    for (let i = 0; i < 9; i++) {
+      const char = stateStr[charIdx++];
+      const colorHex = charToColor[char] !== undefined ? charToColor[char] : COLORS.BLACK;
+      
+      const { gx, gy, gz } = face.getCoords(i);
+      const cubie = getCubieAt(gx, gy, gz);
+      if (cubie) {
+        const mat = getFaceletColor(cubie, face.dir);
+        if (mat) {
+          mat.color.set(colorHex);
+        }
+      }
+    }
+  }
+}
+
+function applyDefaultScramble() {
+  const initialScannedState = "FFBFULFLRBBUDRDLRFLFDLFFBRULDBUDBRLLUUUULUFBDRRRBBRDDD";
+  window.hasPainted = true;
+  applySavedCubeState(initialScannedState);
+  saveCubeStateToStorage();
+}
+
+function loadCubeStateFromStorage() {
+  const savedHasPainted = localStorage.getItem("hasPainted");
+  if (savedHasPainted === "true") {
+    const savedCubeState = localStorage.getItem("savedCubeState");
+    if (savedCubeState && savedCubeState.length === 54) {
+      applySavedCubeState(savedCubeState);
+      window.hasPainted = true;
+    } else {
+      applyDefaultScramble();
+    }
+  } else {
+    const savedHistoryStr = localStorage.getItem("moveHistory");
+    if (savedHistoryStr) {
+      try {
+        const savedHistory = JSON.parse(savedHistoryStr);
+        if (Array.isArray(savedHistory)) {
+          moveHistory = savedHistory;
+          updateMoveHistory(historyDiv, moveHistory);
+          applyInitialMoves(moveHistory);
+        } else {
+          applyDefaultScramble();
+        }
+      } catch (e) {
+        applyDefaultScramble();
+      }
+    } else {
+      applyDefaultScramble();
+    }
+  }
+}
+
+function setupScrubber() {
+  scrubberContainer = document.createElement("div");
+  scrubberContainer.className = "scrubber-panel hidden";
+  
+  const title = document.createElement("div");
+  title.className = "scrubber-title";
+  title.textContent = "Solution Steps";
+  scrubberContainer.appendChild(title);
+  
+  scrubberLabel = document.createElement("div");
+  scrubberLabel.className = "scrubber-label";
+  scrubberLabel.textContent = "Step 0 / 0: Scrambled State";
+  scrubberContainer.appendChild(scrubberLabel);
+  
+  const sliderRow = document.createElement("div");
+  sliderRow.className = "slider-row";
+  
+  scrubberSlider = document.createElement("input");
+  scrubberSlider.type = "range";
+  scrubberSlider.className = "scrubber-slider";
+  scrubberSlider.min = 0;
+  scrubberSlider.max = 0;
+  scrubberSlider.value = 0;
+  sliderRow.appendChild(scrubberSlider);
+  scrubberContainer.appendChild(sliderRow);
+  
+  const controlsRow = document.createElement("div");
+  controlsRow.className = "controls-row";
+  
+  const firstBtn = document.createElement("button");
+  firstBtn.className = "scrubber-btn";
+  firstBtn.innerHTML = "⏮️ First";
+  firstBtn.addEventListener("click", () => seekToStep(0));
+  controlsRow.appendChild(firstBtn);
+  
+  scrubberPrevBtn = document.createElement("button");
+  scrubberPrevBtn.className = "scrubber-btn";
+  scrubberPrevBtn.innerHTML = "◀️ Prev";
+  scrubberPrevBtn.addEventListener("click", () => seekToStep(solutionCurrentStep - 1));
+  controlsRow.appendChild(scrubberPrevBtn);
+  
+  scrubberPlayBtn = document.createElement("button");
+  scrubberPlayBtn.className = "scrubber-btn play-btn";
+  scrubberPlayBtn.innerHTML = "▶️ Play";
+  scrubberPlayBtn.addEventListener("click", togglePlaySolution);
+  controlsRow.appendChild(scrubberPlayBtn);
+  
+  scrubberNextBtn = document.createElement("button");
+  scrubberNextBtn.className = "scrubber-btn";
+  scrubberNextBtn.innerHTML = "Next ▶️";
+  scrubberNextBtn.addEventListener("click", () => seekToStep(solutionCurrentStep + 1));
+  controlsRow.appendChild(scrubberNextBtn);
+  
+  const lastBtn = document.createElement("button");
+  lastBtn.className = "scrubber-btn";
+  lastBtn.innerHTML = "Last ⏭️";
+  lastBtn.addEventListener("click", () => seekToStep(solutionMoves.length));
+  controlsRow.appendChild(lastBtn);
+  
+  scrubberContainer.appendChild(controlsRow);
+  
+  scrubberCloseBtn = document.createElement("button");
+  scrubberCloseBtn.className = "scrubber-close-btn";
+  scrubberCloseBtn.textContent = "✕ Close Solution";
+  scrubberCloseBtn.addEventListener("click", hideScrubber);
+  scrubberContainer.appendChild(scrubberCloseBtn);
+  
+  document.body.appendChild(scrubberContainer);
+  
+  scrubberSlider.addEventListener("input", (e) => {
+    const val = parseInt(e.target.value, 10);
+    seekToStep(val);
+  });
+}
+
+function showScrubber() {
+  scrubberSlider.max = solutionMoves.length;
+  scrubberSlider.value = 0;
+  solutionCurrentStep = 0;
+  
+  scrubberLabel.textContent = "Step 0 / " + solutionMoves.length + ": Scrambled State";
+  
+  scrubberContainer.classList.remove("hidden");
+  
+  solveButton.disabled = true;
+  scrambleButton.disabled = true;
+  
+  isPlayingSolution = false;
+  scrubberPlayBtn.innerHTML = "▶️ Play";
+  scrubberPlayBtn.classList.remove("paused");
+  
+  resetCubeModelToInitial();
+  
+  cubeInstance = initialHasPainted ? Cube.fromString(initialCubeState) : new Cube();
+  if (!initialHasPainted) {
+    cubeInstance.move(initialCubeState.join(" "));
+  }
+}
+
+function hideScrubber() {
+  pauseSolution();
+  scrubberContainer.classList.add("hidden");
+  
+  solveButton.disabled = false;
+  scrambleButton.disabled = false;
+  
+  resetCube();
+}
+
+function seekToStep(step) {
+  if (step < 0 || step > solutionMoves.length) return;
+  
+  if (isPlayingSolution) {
+    pauseSolution();
+  }
+  
+  solutionCurrentStep = step;
+  scrubberSlider.value = step;
+  
+  resetCubeModelToInitial();
+  
+  const movesToApply = solutionMoves.slice(0, step);
+  applyInitialMoves(movesToApply);
+  
+  cubeInstance = initialHasPainted ? Cube.fromString(initialCubeState) : new Cube();
+  if (!initialHasPainted) {
+    cubeInstance.move(initialCubeState.join(" "));
+  }
+  movesToApply.forEach(move => {
+    cubeInstance.move(move);
+  });
+  
+  if (step === 0) {
+    scrubberLabel.textContent = "Step 0 / " + solutionMoves.length + ": Scrambled State";
+  } else if (step === solutionMoves.length) {
+    scrubberLabel.textContent = "Step " + step + " / " + solutionMoves.length + ": Solved!";
+  } else {
+    scrubberLabel.textContent = "Step " + step + " / " + solutionMoves.length + ": " + solutionMoves[step - 1];
+  }
+}
+
+function resetCubeModelToInitial() {
+  if (cubeGroup) {
+    while (cubeGroup.children.length > 0) {
+      const child = cubeGroup.children[0];
+      cubeGroup.remove(child);
+    }
+    
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.userData.isCubie) {
+        if (object.parent) {
+          object.parent.remove(object);
+        }
+        if (!cubiePool.includes(object)) {
+          cubiePool.push(object);
+        }
+      }
+    });
+  }
+  
+  createRubiksCube();
+  
+  if (initialHasPainted) {
+    applySavedCubeState(initialCubeState);
+  } else {
+    applyInitialMoves(initialCubeState);
+  }
+}
+
+function togglePlaySolution() {
+  if (isPlayingSolution) {
+    pauseSolution();
+  } else {
+    playSolution();
+  }
+}
+
+function playSolution() {
+  if (solutionCurrentStep >= solutionMoves.length) {
+    solutionCurrentStep = 0;
+  }
+  
+  isPlayingSolution = true;
+  scrubberPlayBtn.innerHTML = "⏸️ Pause";
+  scrubberPlayBtn.classList.add("paused");
+  
+  playNextStep();
+}
+
+function pauseSolution() {
+  isPlayingSolution = false;
+  scrubberPlayBtn.innerHTML = "▶️ Play";
+  scrubberPlayBtn.classList.remove("paused");
+  if (playTimeoutId) {
+    clearTimeout(playTimeoutId);
+    playTimeoutId = null;
+  }
+}
+
+function playNextStep() {
+  if (!isPlayingSolution) return;
+  
+  if (solutionCurrentStep >= solutionMoves.length) {
+    pauseSolution();
+    return;
+  }
+  
+  const move = solutionMoves[solutionCurrentStep];
+  cubeInstance.move(move);
+  
+  const layerName = move.charAt(0);
+  let direction = move.includes("'") ? 1 : -1;
+  if (layerName.includes('B') || layerName.includes('L') || layerName.includes('D')) {
+    direction = -direction;
+  }
+  
+  const layerMap = { F: 8, B: 6, U: 5, D: 3, R: 2, L: 0 };
+  
+  isAnimating = true;
+  rotateLayer(
+    layerMap[layerName],
+    direction,
+    layers,
+    isAnimating,
+    moveHistory,
+    historyDiv,
+    cubeGroup,
+    scene,
+    cubiesContainer,
+    400
+  );
+  
+  solutionCurrentStep++;
+  scrubberSlider.value = solutionCurrentStep;
+  
+  if (solutionCurrentStep === solutionMoves.length) {
+    scrubberLabel.textContent = "Step " + solutionCurrentStep + " / " + solutionMoves.length + ": Solved!";
+  } else {
+    scrubberLabel.textContent = "Step " + solutionCurrentStep + " / " + solutionMoves.length + ": " + solutionMoves[solutionCurrentStep - 1];
+  }
+  
+  playTimeoutId = setTimeout(() => {
+    isAnimating = false;
+    playNextStep();
+  }, 800);
+}
 
 // Initialize everything
 init();
@@ -159,6 +549,12 @@ function init() {
   window.addEventListener("pointerdown", window._onPointerDown);
   window.addEventListener("pointermove", window._onPointerMove);
   window.addEventListener("pointerup", window._onPointerUp);
+
+  // Setup solution scrubber widget
+  setupScrubber();
+
+  // Load saved state or default scramble
+  loadCubeStateFromStorage();
 }
 
 function setupCamera() {
@@ -351,7 +747,7 @@ function setupUI(dl1, dl2) {
   btnGroup.appendChild(row2);
 
   resetButton = document.createElement("button");
-  resetButton.textContent = "Reset";
+  resetButton.textContent = "Clear State";
   resetButton.addEventListener("click", resetCube);
   row2.appendChild(resetButton);
 
@@ -828,16 +1224,14 @@ async function solveCube() {
       return;
     }
     
-    isSolving = true;
-    solveButton.disabled = true;
-    scrambleButton.disabled = true;
+    // Save current state for scrubbing resets
+    initialHasPainted = false;
+    initialCubeState = [...moveHistory];
     
-    // Set starting state on cubeInstance to current scrambled state, and play reverse moves
-    cubeInstance = new Cube();
-    cubeInstance.move(moveHistory.join(" "));
+    solutionMoves = [...inverseMoves];
+    solutionCurrentStep = 0;
     
-    let i = 0;
-    animateSequence(inverseMoves, i);
+    showScrubber();
     return;
   }
   
@@ -880,6 +1274,7 @@ async function solveCube() {
   }
   
   isSolving = true;
+  window.isSolving = true;
   solveButton.disabled = true;
   scrambleButton.disabled = true;
   
@@ -895,6 +1290,7 @@ async function solveCube() {
         false
       );
       isSolving = false;
+      window.isSolving = false;
       solveButton.disabled = false;
       scrambleButton.disabled = false;
       return;
@@ -904,7 +1300,10 @@ async function solveCube() {
     
     if (algorithm === "") {
       showAlert("Cube Solved", "The cube is already in a solved state!", true);
-      endSequence();
+      solveButton.disabled = false;
+      scrambleButton.disabled = false;
+      isSolving = false;
+      window.isSolving = false;
       return;
     }
 
@@ -919,96 +1318,22 @@ async function solveCube() {
       }
     });
     
-    // Reset cubeInstance starting state to the scanned state for animation
-    cubeInstance = Cube.fromString(scannedState);
+    // Save current state for scrubbing resets
+    initialHasPainted = true;
+    initialCubeState = scannedState; // 54-char string
     
-    // Start animation
-    let i = 0;
-    animateSequence(fsolution, i);
+    solutionMoves = fsolution;
+    solutionCurrentStep = 0;
+    
+    showScrubber();
   });
 }
 
-function animateSequence(solution, i) {
-  if (cubeInstance.isSolved()) {
-    endSequence();
-    return;
-  }
 
-
-  // Check if we've completed all moves
-  if (i >= solution.length) {
-    console.log("ci:final", cubeInstance.toJSON());
-    
-    // Final verification
-    if (!cubeInstance.isSolved()) {
-      console.error("Error: Cube is not solved after applying all moves!");
-    } else {
-      console.log("Cube successfully solved!");
-    }
-    
-    endSequence();
-    return;
-  }
-  
-  // Apply the current move to the model
-  const move = solution[i];
-  cubeInstance.move(move);
-  // console.log("ci:during", cubeInstance.toJSON());
-  
-  // Map move notation to layer index
-  const layerName = move.charAt(0);
-
-  let direction = move.includes("'") ? 1 : -1;
-  if (layerName.includes('B') || layerName.includes('L') || layerName.includes('D')) {
-    direction = -direction;  // Invert the direction for these faces
-  }
-  
-  const layerMap = {
-    F: 8,
-    B: 6,
-    U: 5,
-    D: 3,
-    R: 2,
-    L: 0,
-  };
-  
-  // const layerMap = {
-  //   F: 2,
-  //   S: 7,
-  //   B: 0,
-  //   U: 5,
-  //   E: 4,
-  //   D: 3,
-  //   R: 6,
-  //   M: 1,
-  //   L: 8,
-  // };
-
-  // Animate the visual representation
-  let animationTime = 100;
-  let waitTime = 300;
-  rotateLayer(
-    layerMap[layerName],
-    direction,
-    layers,
-    isAnimating,
-    moveHistory,
-    historyDiv,
-    cubeGroup,
-    scene,
-    cubiesContainer,
-    animationTime
-  );
-  
-  // Wait for animation to complete before next move
-  setTimeout(() => {
-    i++;
-    animateSequence(solution, i);
-  }, waitTime);
-}
 
 function endSequence() {
   isSolving = false;
+  window.isSolving = false;
   solveButton.disabled = false;
   scrambleButton.disabled = false;
   // Clear move history after solving
@@ -1048,6 +1373,11 @@ async function initSolver() {
 function resetCube() {
   if (isAnimating || isSolving) return;
   window.hasPainted = false;
+
+  // Clear localStorage saved state!
+  localStorage.removeItem("hasPainted");
+  localStorage.removeItem("savedCubeState");
+  localStorage.removeItem("moveHistory");
 
   // Reset history
   moveHistory = [];

@@ -770,7 +770,7 @@ export function rotateLayer(
   }
 }
 
-function completeRotation(
+export function completeRotation(
   tempLayer,
   axis,
   angle,
