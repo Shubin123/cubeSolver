@@ -567,3 +567,328 @@ button#btn-scramble:hover:not(:disabled) {
   border-color: var(--accent-color);
   box-shadow: 0 0 8px var(--accent-glow);
 }
+
+/* Camera Scanner */
+.scan-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  background: rgba(10, 11, 20, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.scan-overlay.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.scan-dialog {
+  width: 100%;
+  max-width: 680px;
+  max-height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 20px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-glow);
+  border-radius: 24px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.scan-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.scan-title {
+  font-size: 18px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.scan-step {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.scan-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--border-glow);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.scan-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.scan-view,
+.scan-review {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.scan-view.hidden,
+.scan-review.hidden,
+.scan-message.hidden,
+.scan-note.hidden {
+  display: none;
+}
+
+.scan-stage {
+  position: relative;
+  width: 100%;
+  max-height: 55vh;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+}
+
+/* video and guide share object-fit so the grid stays over the same pixels */
+.scan-stage video,
+.scan-stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.scan-stage.mirrored video,
+.scan-stage.mirrored canvas {
+  transform: scaleX(-1);
+}
+
+.scan-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.scan-stage.flash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+  animation: scan-flash 0.35s ease-out forwards;
+}
+
+@keyframes scan-flash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.scan-instructions {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.scan-chip {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin: 0 2px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  vertical-align: -2px;
+}
+
+.scan-progress {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.scan-thumb {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  width: 36px;
+  height: 36px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-glow);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.scan-thumb span {
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.scan-thumb.active {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.scan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.scan-btn {
+  flex: 1;
+  min-width: 110px;
+  padding: 12px;
+  border-radius: 10px;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid var(--border-glow);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  transition: all 0.2s ease-in-out;
+}
+
+.scan-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.scan-btn.primary {
+  background: var(--accent-color);
+  border-color: transparent;
+  box-shadow: 0 4px 14px var(--accent-glow);
+}
+
+.scan-btn.primary:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.scan-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.scan-net {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 3px;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.scan-sticker {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.scan-sticker.center {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.75);
+}
+
+.scan-sticker.low {
+  outline: 2px dashed #fbbf24;
+  outline-offset: 1px;
+}
+
+.scan-sticker.changed {
+  outline: 2px solid #a5b4fc;
+  outline-offset: 1px;
+}
+
+.scan-sticker.problem {
+  outline: 2px solid var(--danger-color);
+  outline-offset: 1px;
+}
+
+.scan-sticker:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.scan-status {
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.scan-status.ok {
+  color: #34d399;
+}
+
+.scan-status.bad {
+  color: #f87171;
+}
+
+.scan-note {
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  color: #a5b4fc;
+}
+
+.scan-problems {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.scan-problems:empty {
+  display: none;
+}
+
+.scan-hint {
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 520px) {
+  .scan-dialog {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .scan-btn {
+    min-width: 0;
+    padding: 10px;
+    font-size: 13px;
+  }
+}

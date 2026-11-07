@@ -21,6 +21,7 @@ import {
 } from "./update/mouse.js";
 
 import { updateBloomHighlight, extraBloomCallback } from "./update/light.js";
+import { openScanner } from "./scan/scanner.js";
 
 // Constants for cube dimensions
 const CUBE_SIZE = 3; // 3x3x3 standard Rubik's cube
@@ -63,6 +64,7 @@ let cubeInstance;
 let moveHistory = [];
 let solveButton;
 let scrambleButton;
+let scanButton;
 let extraBloomButton;
 let resetButton;
 let rotateButton;
@@ -180,6 +182,25 @@ function applySavedCubeState(stateStr) {
       }
     }
   }
+}
+
+// A 54-letter facelet string from the camera scanner replaces the cube, the
+// same way a painted cube is stored
+function applyScannedState(stateStr) {
+  if (isSolving) return false;
+  // scanning takes far longer than a layer turn, so nothing is mid-animation
+  isAnimating = false;
+  if (!scrubberContainer.classList.contains("hidden")) {
+    hideScrubber();
+  }
+
+  moveHistory = [];
+  updateMoveHistory(historyDiv, moveHistory);
+  createRubiksCube();
+  window.hasPainted = true;
+  applySavedCubeState(stateStr);
+  saveCubeStateToStorage();
+  return true;
 }
 
 function applyDefaultScramble() {
@@ -780,6 +801,15 @@ function setupUI(dl1, dl2) {
   solveButton.addEventListener("click", solveCube);
   row1.appendChild(solveButton);
 
+  scanButton = document.createElement("button");
+  scanButton.id = "btn-scan";
+  scanButton.textContent = "📷 Scan Cube";
+  scanButton.addEventListener("click", () => {
+    if (isSolving) return;
+    openScanner({ onApply: applyScannedState });
+  });
+  btnGroup.appendChild(scanButton);
+
   const row2 = document.createElement("div");
   row2.className = "btn-row";
   btnGroup.appendChild(row2);
@@ -823,6 +853,7 @@ function setupUI(dl1, dl2) {
   controlsText.className = "controls-info";
   controlsText.innerHTML = `
         <p>• Click and drag on a face to rotate it</p>
+        <p>• Scan Cube reads a real cube with your camera</p>
         <p>• Select a color to enter Paint Mode</p>
         <p>• Drag background to orbit view</p>
         <p>• Use mouse wheel to zoom</p>
