@@ -3,6 +3,12 @@
 ### to run:
 #### Open an http/https server & point to index.html.
 
+### Solving
+
+**Solve** reads the stickers off the 3D cube and first checks that a real cube could look like that. If it couldn't, it says why: a twisted corner, a flipped edge, two pieces swapped, or a color used the wrong number of times. The solver is Kociemba's two-phase algorithm ([cubejs](https://github.com/ldez/cubejs)) running in a Web Worker. It searches along all three axes, and also solves the inverse cube, keeping the shortest result. When the move history still describes the cube, undoing it is tried too. Solutions average about 21 moves (20.9 over 60 random cubes), usually in well under a second once the solver has started.
+
+`node scratch/test_solver.js path/to/cubejs/lib` checks the move helpers and the worker against a local copy of cubejs.
+
 ### Scanning a real cube
 
 Open the menu and press **📷 Scan Cube**. The camera needs the page served over HTTPS or from `localhost`.

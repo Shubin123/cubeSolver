@@ -146,6 +146,11 @@ button#btn-scramble:hover:not(:disabled) {
   box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
 }
 
+button#btn-scramble:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 /* History and Info Sections */
 .section-title {
   font-size: 14px;

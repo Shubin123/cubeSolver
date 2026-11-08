@@ -8,20 +8,27 @@ import { RenderPixelatedPass } from "three/examples/jsm/postprocessing/RenderPix
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
 import Cube from "cubejs";
-// Attach Cube to window for async.js
-window.Cube = Cube;
 
 import {
   onPointerDown,
   onPointerMove,
   onPointerUp,
-  rotateLayer,
   updateMoveHistory,
-  completeRotation,
+  turnLayer,
 } from "./update/mouse.js";
 
 import { updateBloomHighlight, extraBloomCallback } from "./update/light.js";
 import { openScanner } from "./scan/scanner.js";
+import { isSolvable, describeProblems, FACE_LETTERS } from "./scan/cubeState.js";
+import { warmUpSolver, solveFacelets } from "./solver/solver.js";
+import {
+  FACE_LAYERS,
+  moveAngle,
+  invertMoves,
+  simplifyMoves,
+  randomScramble,
+  isMove,
+} from "./solver/moves.js";
 
 // Constants for cube dimensions
 const CUBE_SIZE = 3; // 3x3x3 standard Rubik's cube
@@ -50,15 +57,24 @@ let glitchPass;
 let pixelPass;
 // let lastClickedFace = -1;
 
+const SOLVED_STATE = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB";
+const DEFAULT_STATE = "FFBFULFLRBBUDRDLRFLFDLFFBRULDBUDBRLLUUUULUFBDRRRBBRDDD";
+// Sticker color and position of each face, in U R F D L B order
+const FACE_COLOR_NAMES = ["White", "Blue", "Red", "Yellow", "Green", "Orange"];
+const FACE_POSITIONS = ["top", "right", "front", "bottom", "left", "back"];
+
 // Cube components
 let cubeGroup; // Holds the entire Rubik's cube
 let layers = []; // Groups for each rotatable layer
-let isSolving = false;
-let isAnimating = false;
+let isSolving = false; // waiting for the solver
+let isScrambling = false;
+let isAnimating = false; // a face turn is animating or queued
 let cubiePool = [];
-let cubeString = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB";
+let cubeString = SOLVED_STATE;
 let cubiesContainer;
-let cubeInstance;
+let cubeGeneration = 0; // bumped on every rebuild, abandoning turns in flight
+let pendingTurns = 0;
+let turnQueue = Promise.resolve();
 
 // UI Components
 let moveHistory = [];
@@ -76,9 +92,6 @@ let alertTitleElement;
 let alertBodyElement;
 let alertCloseButton;
 
-window.hasPainted = false;
-window.isSolving = false;
-
 let scrubberContainer;
 let scrubberSlider;
 let scrubberLabel;
@@ -87,64 +100,64 @@ let scrubberPrevBtn;
 let scrubberNextBtn;
 let scrubberCloseBtn;
 
-let solutionMoves = [];
-let solutionCurrentStep = 0;
-let isPlayingSolution = false;
-let playTimeoutId = null;
-let initialCubeState = null;
-let initialHasPainted = false;
+// The solution being shown: `step` counts the moves applied or animating
+const solution = { open: false, start: null, moves: [], step: 0, playing: false, history: [] };
+let playToken = 0; // bumped to stop the play loop
 let playbackSpeedMultiplier = 1.0;
 
+// The facelets are the cube's state. The move history is kept alongside so
+// the solver can also try undoing it.
 function saveCubeStateToStorage() {
-  localStorage.setItem("hasPainted", window.hasPainted ? "true" : "false");
-  if (window.hasPainted) {
-    const scannedState = getCubeStateString();
-    localStorage.setItem("savedCubeState", scannedState);
-  } else {
-    localStorage.setItem("moveHistory", JSON.stringify(moveHistory));
-  }
+  const state = getCubeStateString();
+  if (!state) return; // a turn is still settling
+  localStorage.setItem("savedCubeState", state);
+  localStorage.setItem("moveHistory", JSON.stringify(moveHistory));
+  localStorage.removeItem("hasPainted");
 }
 window.saveCubeStateToStorage = saveCubeStateToStorage;
 
-function applyInitialMoves(moves) {
-  const layerMap = {
-    L: 0, M: 1, R: 2, D: 3, E: 4, U: 5, B: 6, S: 7, F: 8
-  };
-  
-  moves.forEach(move => {
-    const layerName = move.charAt(0);
-    let direction = move.includes("'") ? 1 : -1;
-    if (layerName.includes('B') || layerName.includes('L') || layerName.includes('D')) {
-      direction = -direction;
-    }
-    const layerIndex = layerMap[layerName];
-    if (layerIndex === undefined) return;
-    
-    const axis = new THREE.Vector3();
-    if (layerIndex < 3) axis.set(1, 0, 0);
-    else if (layerIndex < 6) axis.set(0, 1, 0);
-    else axis.set(0, 0, 1);
-    
-    const layerCubies = layers[layerIndex].userData.cubieRefs.slice();
-    const tempLayer = new THREE.Group();
-    cubeGroup.add(tempLayer);
-    
-    layerCubies.forEach((cubie) => {
-      cubie.parent.remove(cubie);
-      tempLayer.add(cubie);
-    });
-    
-    const targetAngle = (direction * Math.PI) / 2;
-    
-    completeRotation(
-      tempLayer,
-      axis,
-      targetAngle,
-      cubiesContainer,
-      cubeGroup,
-      layers
-    );
+function applyMovesInstantly(moves) {
+  moves.forEach((move) => {
+    turnLayer(FACE_LAYERS[move[0]], moveAngle(move), 0, layers, cubeGroup, scene, cubiesContainer);
   });
+}
+
+// Animate a face turn once any turns queued before it have finished.
+// Resolves false if the cube was rebuilt first, abandoning the turn.
+function animateMove(move, duration) {
+  const generation = cubeGeneration;
+  pendingTurns++;
+  isAnimating = true;
+  turnQueue = turnQueue
+    .then(
+      () =>
+        new Promise((resolve) => {
+          if (generation !== cubeGeneration) return resolve(false);
+          turnLayer(FACE_LAYERS[move[0]], moveAngle(move), duration, layers, cubeGroup, scene, cubiesContainer, resolve);
+        })
+    )
+    .then((done) => {
+      pendingTurns--;
+      isAnimating = pendingTurns > 0;
+      return done;
+    });
+  return turnQueue;
+}
+
+function setCubeState(stateStr) {
+  createRubiksCube();
+  applySavedCubeState(stateStr);
+}
+
+function inputLocked() {
+  return isSolving || isScrambling || solution.open;
+}
+
+function updateButtons() {
+  const locked = inputLocked();
+  solveButton.disabled = locked;
+  scrambleButton.disabled = locked;
+  solveButton.textContent = isSolving ? "Solving…" : "Solve";
 }
 
 function applySavedCubeState(stateStr) {
@@ -187,58 +200,43 @@ function applySavedCubeState(stateStr) {
 // A 54-letter facelet string from the camera scanner replaces the cube, the
 // same way a painted cube is stored
 function applyScannedState(stateStr) {
-  if (isSolving) return false;
-  // scanning takes far longer than a layer turn, so nothing is mid-animation
-  isAnimating = false;
-  if (!scrubberContainer.classList.contains("hidden")) {
+  if (isSolving || isScrambling) return false;
+  if (solution.open) {
     hideScrubber();
   }
 
   moveHistory = [];
   updateMoveHistory(historyDiv, moveHistory);
-  createRubiksCube();
-  window.hasPainted = true;
-  applySavedCubeState(stateStr);
+  setCubeState(stateStr);
   saveCubeStateToStorage();
   return true;
 }
 
-function applyDefaultScramble() {
-  const initialScannedState = "FFBFULFLRBBUDRDLRFLFDLFFBRULDBUDBRLLUUUULUFBDRRRBBRDDD";
-  window.hasPainted = true;
-  applySavedCubeState(initialScannedState);
-  saveCubeStateToStorage();
-}
-
 function loadCubeStateFromStorage() {
-  const savedHasPainted = localStorage.getItem("hasPainted");
-  if (savedHasPainted === "true") {
-    const savedCubeState = localStorage.getItem("savedCubeState");
-    if (savedCubeState && savedCubeState.length === 54) {
-      applySavedCubeState(savedCubeState);
-      window.hasPainted = true;
-    } else {
-      applyDefaultScramble();
-    }
-  } else {
-    const savedHistoryStr = localStorage.getItem("moveHistory");
-    if (savedHistoryStr) {
-      try {
-        const savedHistory = JSON.parse(savedHistoryStr);
-        if (Array.isArray(savedHistory)) {
-          moveHistory = savedHistory;
-          updateMoveHistory(historyDiv, moveHistory);
-          applyInitialMoves(moveHistory);
-        } else {
-          applyDefaultScramble();
-        }
-      } catch (e) {
-        applyDefaultScramble();
-      }
-    } else {
-      applyDefaultScramble();
-    }
+  let savedHistory = [];
+  try {
+    savedHistory = JSON.parse(localStorage.getItem("moveHistory")) || [];
+  } catch (e) {
+    // unreadable history, start without one
   }
+  if (!Array.isArray(savedHistory) || !savedHistory.every(isMove)) savedHistory = [];
+  const savedCubeState = localStorage.getItem("savedCubeState");
+  // older saves kept either the moves made since the cube was solved or,
+  // once it had been painted, only the stickers
+  const legacyMode = localStorage.getItem("hasPainted");
+
+  if (legacyMode === "false") {
+    applyMovesInstantly(savedHistory);
+  } else if (savedCubeState && savedCubeState.length === 54) {
+    if (legacyMode === "true") savedHistory = [];
+    applySavedCubeState(savedCubeState);
+  } else {
+    savedHistory = [];
+    applySavedCubeState(DEFAULT_STATE);
+  }
+  moveHistory = savedHistory;
+  updateMoveHistory(historyDiv, moveHistory);
+  saveCubeStateToStorage();
 }
 
 function setupScrubber() {
@@ -313,7 +311,7 @@ function setupScrubber() {
   scrubberPrevBtn = document.createElement("button");
   scrubberPrevBtn.className = "scrubber-btn";
   scrubberPrevBtn.innerHTML = "◀️ Prev";
-  scrubberPrevBtn.addEventListener("click", () => seekToStep(solutionCurrentStep - 1));
+  scrubberPrevBtn.addEventListener("click", () => stepSolution(-1));
   controlsRow.appendChild(scrubberPrevBtn);
   
   scrubberPlayBtn = document.createElement("button");
@@ -325,13 +323,13 @@ function setupScrubber() {
   scrubberNextBtn = document.createElement("button");
   scrubberNextBtn.className = "scrubber-btn";
   scrubberNextBtn.innerHTML = "Next ▶️";
-  scrubberNextBtn.addEventListener("click", () => seekToStep(solutionCurrentStep + 1));
+  scrubberNextBtn.addEventListener("click", () => stepSolution(1));
   controlsRow.appendChild(scrubberNextBtn);
   
   const lastBtn = document.createElement("button");
   lastBtn.className = "scrubber-btn";
   lastBtn.innerHTML = "Last ⏭️";
-  lastBtn.addEventListener("click", () => seekToStep(solutionMoves.length));
+  lastBtn.addEventListener("click", () => seekToStep(solution.moves.length));
   controlsRow.appendChild(lastBtn);
   
   scrubberContainer.appendChild(controlsRow);
@@ -350,185 +348,112 @@ function setupScrubber() {
   });
 }
 
-function showScrubber() {
-  scrubberSlider.max = solutionMoves.length;
-  scrubberSlider.value = 0;
-  solutionCurrentStep = 0;
-  
-  scrubberLabel.textContent = "Step 0 / " + solutionMoves.length + ": Scrambled State";
-  
+function showScrubber(start, moves) {
+  solution.open = true;
+  solution.start = start;
+  solution.moves = moves;
+  solution.history = moveHistory.slice();
+  scrubberSlider.max = moves.length;
   scrubberContainer.classList.remove("hidden");
-  
-  solveButton.disabled = true;
-  scrambleButton.disabled = true;
-  
-  isPlayingSolution = false;
-  scrubberPlayBtn.innerHTML = "▶️ Play";
-  scrubberPlayBtn.classList.remove("paused");
-  
-  resetCubeModelToInitial();
-  
-  cubeInstance = initialHasPainted ? Cube.fromString(initialCubeState) : new Cube();
-  if (!initialHasPainted) {
-    cubeInstance.move(initialCubeState.join(" "));
-  }
+  updateButtons();
+  seekToStep(0);
 }
 
+// Closing keeps whatever step is shown
 function hideScrubber() {
   pauseSolution();
+  const state = stateAtStep(solution.step);
+  setCubeState(state); // settles a turn still in flight
+  moveHistory =
+    state === SOLVED_STATE ? [] : [...solution.history, ...solution.moves.slice(0, solution.step)];
+  updateMoveHistory(historyDiv, moveHistory);
+  solution.open = false;
   scrubberContainer.classList.add("hidden");
-  
-  solveButton.disabled = false;
-  scrambleButton.disabled = false;
-  
-  resetCube();
+  updateButtons();
+  saveCubeStateToStorage();
 }
 
+function stateAtStep(step) {
+  return Cube.fromString(solution.start).move(solution.moves.slice(0, step).join(" ")).asString();
+}
+
+// Jump straight to a step, rebuilding the cube there
 function seekToStep(step) {
-  if (step < 0 || step > solutionMoves.length) return;
-  
-  if (isPlayingSolution) {
-    pauseSolution();
-  }
-  
-  solutionCurrentStep = step;
-  scrubberSlider.value = step;
-  
-  resetCubeModelToInitial();
-  
-  const movesToApply = solutionMoves.slice(0, step);
-  applyInitialMoves(movesToApply);
-  
-  cubeInstance = initialHasPainted ? Cube.fromString(initialCubeState) : new Cube();
-  if (!initialHasPainted) {
-    cubeInstance.move(initialCubeState.join(" "));
-  }
-  movesToApply.forEach(move => {
-    cubeInstance.move(move);
-  });
-  
-  if (step === 0) {
-    scrubberLabel.textContent = "Step 0 / " + solutionMoves.length + ": Scrambled State";
-  } else if (step === solutionMoves.length) {
-    scrubberLabel.textContent = "Step " + step + " / " + solutionMoves.length + ": Solved!";
-  } else {
-    scrubberLabel.textContent = "Step " + step + " / " + solutionMoves.length + ": " + solutionMoves[step - 1];
-  }
+  if (step < 0 || step > solution.moves.length) return;
+  pauseSolution();
+  solution.step = step;
+  setCubeState(stateAtStep(step));
+  updateScrubber();
 }
 
-function resetCubeModelToInitial() {
-  if (cubeGroup) {
-    while (cubeGroup.children.length > 0) {
-      const child = cubeGroup.children[0];
-      cubeGroup.remove(child);
-    }
-    
-    scene.traverse((object) => {
-      if (object instanceof THREE.Mesh && object.userData.isCubie) {
-        if (object.parent) {
-          object.parent.remove(object);
-        }
-        if (!cubiePool.includes(object)) {
-          cubiePool.push(object);
-        }
-      }
-    });
-  }
-  
-  createRubiksCube();
-  
-  if (initialHasPainted) {
-    applySavedCubeState(initialCubeState);
-  } else {
-    applyInitialMoves(initialCubeState);
-  }
+// Prev/Next animate the one move, queued after any turn still finishing
+function stepSolution(delta) {
+  const target = solution.step + delta;
+  if (target < 0 || target > solution.moves.length) return;
+  pauseSolution();
+  const move = delta > 0 ? solution.moves[solution.step] : invertMoves([solution.moves[target]])[0];
+  solution.step = target;
+  updateScrubber();
+  animateMove(move, turnDuration(move));
+}
+
+function updateScrubber() {
+  const { step, moves } = solution;
+  scrubberSlider.value = step;
+  let text = moves[step - 1];
+  if (step === 0) text = "Scrambled State";
+  else if (step === moves.length) text = "Solved!";
+  scrubberLabel.textContent = `Step ${step} / ${moves.length}: ${text}`;
+  scrubberPlayBtn.innerHTML = solution.playing ? "⏸️ Pause" : "▶️ Play";
+  scrubberPlayBtn.classList.toggle("paused", solution.playing);
+}
+
+function turnDuration(move) {
+  return Math.round((move[1] === "2" ? 550 : 380) * playbackSpeedMultiplier);
 }
 
 function togglePlaySolution() {
-  if (isPlayingSolution) {
+  if (solution.playing) {
     pauseSolution();
   } else {
     playSolution();
   }
 }
 
-function playSolution() {
-  if (solutionCurrentStep >= solutionMoves.length) {
-    solutionCurrentStep = 0;
+async function playSolution() {
+  if (solution.step >= solution.moves.length) {
+    seekToStep(0);
   }
-  
-  isPlayingSolution = true;
-  scrubberPlayBtn.innerHTML = "⏸️ Pause";
-  scrubberPlayBtn.classList.add("paused");
-  
-  playNextStep();
+  const token = ++playToken;
+  solution.playing = true;
+  updateScrubber();
+
+  while (solution.step < solution.moves.length) {
+    const move = solution.moves[solution.step++];
+    updateScrubber();
+    // false: a seek rebuilt the cube mid-turn and took over
+    if (!(await animateMove(move, turnDuration(move)))) return;
+    if (token !== playToken) return;
+    await new Promise((resolve) => setTimeout(resolve, 220 * playbackSpeedMultiplier));
+    if (token !== playToken) return;
+  }
+  solution.playing = false;
+  updateScrubber();
 }
 
+// The turn in flight still finishes; the loop stops after it
 function pauseSolution() {
-  isPlayingSolution = false;
-  scrubberPlayBtn.innerHTML = "▶️ Play";
-  scrubberPlayBtn.classList.remove("paused");
-  if (playTimeoutId) {
-    clearTimeout(playTimeoutId);
-    playTimeoutId = null;
+  playToken++;
+  if (solution.playing) {
+    solution.playing = false;
+    updateScrubber();
   }
-}
-
-function playNextStep() {
-  if (!isPlayingSolution) return;
-  
-  if (solutionCurrentStep >= solutionMoves.length) {
-    pauseSolution();
-    return;
-  }
-  
-  const move = solutionMoves[solutionCurrentStep];
-  cubeInstance.move(move);
-  
-  const layerName = move.charAt(0);
-  let direction = move.includes("'") ? 1 : -1;
-  if (layerName.includes('B') || layerName.includes('L') || layerName.includes('D')) {
-    direction = -direction;
-  }
-  
-  const layerMap = { F: 8, B: 6, U: 5, D: 3, R: 2, L: 0 };
-  
-  const animTime = Math.max(10, Math.round(400 * playbackSpeedMultiplier));
-  const waitTime = Math.max(20, Math.round(800 * playbackSpeedMultiplier));
-
-  rotateLayer(
-    layerMap[layerName],
-    direction,
-    layers,
-    false,
-    moveHistory,
-    historyDiv,
-    cubeGroup,
-    scene,
-    cubiesContainer,
-    animTime
-  );
-  isAnimating = true;
-  
-  solutionCurrentStep++;
-  scrubberSlider.value = solutionCurrentStep;
-  
-  if (solutionCurrentStep === solutionMoves.length) {
-    scrubberLabel.textContent = "Step " + solutionCurrentStep + " / " + solutionMoves.length + ": Solved!";
-  } else {
-    scrubberLabel.textContent = "Step " + solutionCurrentStep + " / " + solutionMoves.length + ": " + solutionMoves[solutionCurrentStep - 1];
-  }
-  
-  playTimeoutId = setTimeout(() => {
-    isAnimating = false;
-    playNextStep();
-  }, waitTime);
 }
 
 // Initialize everything
 init();
 animate();
-initSolver();
+warmUpSolver();
 
 function init() {
   // Set up scene first
@@ -567,7 +492,7 @@ function init() {
       mouse,
       controls,
       isAnimating,
-      isSolving,
+      inputLocked(),
       camera,
       cubeGroup,
       cubeString,
@@ -580,7 +505,7 @@ function init() {
       raycaster,
       mouse,
       isAnimating,
-      isSolving,
+      inputLocked(),
       camera,
       layers,
       moveHistory,
@@ -805,7 +730,7 @@ function setupUI(dl1, dl2) {
   scanButton.id = "btn-scan";
   scanButton.textContent = "📷 Scan Cube";
   scanButton.addEventListener("click", () => {
-    if (isSolving) return;
+    if (isSolving || isScrambling) return;
     openScanner({ onApply: applyScannedState });
   });
   btnGroup.appendChild(scanButton);
@@ -937,27 +862,18 @@ function setupColorPicker() {
 function createRubiksCube() {
   // Create or clear the cube group
   if (cubeGroup) {
-    // Clear existing structure
-    while (cubeGroup.children.length > 0) {
-      const child = cubeGroup.children[0];
-      cubeGroup.remove(child);
-    }
-
-    // Return all cubes to the pool
-    scene.traverse((object) => {
-      if (object instanceof THREE.Mesh && object.userData.isCubie) {
-        if (object.parent) {
-          object.parent.remove(object);
-        }
-        if (!cubiePool.includes(object)) {
-          cubiePool.push(object);
-        }
+    // Return every cubie to the pool, including any in a layer mid-turn
+    cubeGroup.traverse((object) => {
+      if (object.userData.isCubie && !cubiePool.includes(object)) {
+        cubiePool.push(object);
       }
     });
+    cubeGroup.clear();
   } else {
     cubeGroup = new THREE.Group();
     scene.add(cubeGroup);
   }
+  cubeGeneration++;
 
   // Create main cubies container
   cubiesContainer = new THREE.Group();
@@ -1062,47 +978,27 @@ function createCubie(x, y, z) {
   return cubie;
 }
 
-function scrambleCube() {
-  if (isAnimating || isSolving) return;
-  window.hasPainted = false;
+// Start from solved and animate a random 20-turn scramble
+async function scrambleCube() {
+  if (isAnimating || inputLocked()) return;
+  isScrambling = true;
+  updateButtons();
   glitchPass = new GlitchPass(1);
   composer.addPass(glitchPass);
 
-  // Reset history
+  createRubiksCube();
   moveHistory = [];
   updateMoveHistory(historyDiv, moveHistory);
-
-  const moves = 10;
-  const layerIndices = [0, 2, 3, 5, 6, 8]; // Only outer layers: L, R, D, U, B, F
-
-  let i = 0;
-  function doNextMove() {
-    if (i >= moves) {
-      return;
-    }
-    const layerIndex =
-      layerIndices[Math.floor(Math.random() * layerIndices.length)];
-    const direction = Math.random() > 0.5 ? 1 : -1;
-
-    rotateLayer(
-      layerIndex,
-      direction,
-      layers,
-      isAnimating,
-      moveHistory,
-      historyDiv,
-      cubeGroup,
-      scene,
-      cubiesContainer
-    );
-
-    // Wait for animation to complete before next move
-    setTimeout(() => {
-      i++;
-      composer.removePass(glitchPass);
-      doNextMove();
-    }, 600);
+  for (const move of randomScramble()) {
+    if (!(await animateMove(move, 110))) break;
+    moveHistory.push(move);
+    updateMoveHistory(historyDiv, moveHistory);
   }
+
+  composer.removePass(glitchPass);
+  isScrambling = false;
+  updateButtons();
+  saveCubeStateToStorage();
 }
 
 function calculateGridPosition(cubie) {
@@ -1246,207 +1142,87 @@ function getCubeStateString() {
     for (let i = 0; i < 9; i++) {
       const { gx, gy, gz } = face.getCoords(i);
       const cubie = getCubieAt(gx, gy, gz);
-      if (!cubie) {
-        console.error(`Missing cubie at: ${gx}, ${gy}, ${gz}`);
-        stateStr += "?";
-        continue;
-      }
-      const mat = getFaceletColor(cubie, face.dir);
-      if (!mat) {
-        console.error(`Could not find material for: ${gx}, ${gy}, ${gz}`);
-        stateStr += "?";
-        continue;
-      }
-      const letter = matchColorToLetter(mat.color);
-      console.log(`Scan: Face=${face.name}, index=${i}, grid=(${gx},${gy},${gz}), color=(r=${mat.color.r.toFixed(3)},g=${mat.color.g.toFixed(3)},b=${mat.color.b.toFixed(3)}) hex=#${mat.color.getHexString()} -> letter=${letter}`);
-      stateStr += letter;
+      // missing while a layer is mid-turn
+      const mat = cubie && getFaceletColor(cubie, face.dir);
+      if (!mat) return null;
+      stateStr += matchColorToLetter(mat.color);
     }
   }
   
   return stateStr;
 }
 
-function getInverseMoves(moves) {
-  const inverseMoves = [];
-  for (let i = moves.length - 1; i >= 0; i--) {
-    const move = moves[i];
-    if (move === "") continue;
-    if (move.endsWith("'")) {
-      inverseMoves.push(move.slice(0, -1));
-    } else if (move.endsWith("2")) {
-      inverseMoves.push(move);
-    } else {
-      inverseMoves.push(move + "'");
+// Why the stickers can't be solved, or null if they can
+function findStateProblem(state) {
+  for (let f = 0; f < 6; f++) {
+    if (state[9 * f + 4] !== FACE_LETTERS[f]) {
+      return `The ${FACE_POSITIONS[f]} center is painted ${FACE_COLOR_NAMES[FACE_LETTERS.indexOf(state[9 * f + 4])].toLowerCase()}. Centers can't move on a real cube, so it has to stay ${FACE_COLOR_NAMES[f].toLowerCase()}.`;
     }
   }
-  return inverseMoves;
+  const faces = [...state].map((letter) => FACE_LETTERS.indexOf(letter));
+  if (isSolvable(faces)) return null;
+  const problems = describeProblems(faces, FACE_COLOR_NAMES).map((p) => `• ${p.message}`);
+  return `No real cube has these colors:\n\n${problems.join("\n")}\n\nRepaint those stickers or scan the cube again.`;
+}
+
+// Undoing the move history solves the cube whenever the history still
+// describes it, i.e. nothing was painted or scanned since it was solved
+function undoHistory(state) {
+  if (!moveHistory.length || !moveHistory.every(isMove)) return null;
+  const undo = simplifyMoves(invertMoves(moveHistory));
+  return solves(state, undo) ? undo : null;
+}
+
+function solves(state, moves) {
+  return moves.every(isMove) && Cube.fromString(state).move(moves.join(" ")).isSolved();
 }
 
 async function solveCube() {
-  if (isAnimating || isSolving) return;
-  
-  // Fast Path: If user hasn't custom-painted facelets, solve instantly by reversing moveHistory!
-  if (!window.hasPainted) {
-    const inverseMoves = getInverseMoves(moveHistory);
-    if (inverseMoves.length === 0) {
-      showAlert("Cube Solved", "The cube is already in a solved state!", true);
-      return;
-    }
-    
-    // Save current state for scrubbing resets
-    initialHasPainted = false;
-    initialCubeState = [...moveHistory];
-    
-    solutionMoves = [...inverseMoves];
-    solutionCurrentStep = 0;
-    
-    showScrubber();
+  if (isAnimating || inputLocked()) return;
+  const state = getCubeStateString();
+  if (!state) return;
+
+  const problem = findStateProblem(state);
+  if (problem) {
+    showAlert("Unsolvable Cube State", problem);
     return;
   }
-  
-  // Custom painted state: Scan 3D model
-  const scannedState = getCubeStateString();
-  console.log("Scanned state:", scannedState);
-  
-  // Basic validation check: 6 colors each have 9 quads
-  const counts = { U: 0, R: 0, F: 0, D: 0, L: 0, B: 0 };
-  for (let i = 0; i < scannedState.length; i++) {
-    const char = scannedState[i];
-    if (counts[char] !== undefined) {
-      counts[char]++;
-    }
-  }
-  
-  const colorNames = {
-    U: "White (Up)",
-    R: "Blue (Right)",
-    F: "Red (Front)",
-    D: "Yellow (Down)",
-    L: "Green (Left)",
-    B: "Orange (Back)"
-  };
-  
-  let invalidCounts = [];
-  for (const [letter, count] of Object.entries(counts)) {
-    if (count !== 9) {
-      invalidCounts.push(`• ${colorNames[letter]}: ${count} (expected 9)`);
-    }
-  }
-  
-  if (invalidCounts.length > 0) {
-    showAlert(
-      "Unfeasible Cube State",
-      `Each of the 6 colors must have exactly 9 facelets. Current counts:\n\n${invalidCounts.join("\n")}\n\nPlease paint the cube correctly before solving.`,
-      false
-    );
+  if (state === SOLVED_STATE) {
+    showAlert("Cube Solved", "The cube is already in a solved state!", true);
     return;
   }
-  
+
   isSolving = true;
-  window.isSolving = true;
-  solveButton.disabled = true;
-  scrambleButton.disabled = true;
-  
-  cubeInstance = Cube.fromString(scannedState);
-  
-  // Get the solution, passing 22 as solveN to limit depth and prevent infinite worker hangs
-  await Cube._asyncSolve(cubeInstance, 22, (error, algorithm) => {
-    if (error) {
-      console.error("Solver error:", error);
-      showAlert(
-        "Invalid Cube State",
-        `The color combination is mathematically impossible to solve: ${error}\n\nCheck that corner and edge piece color combinations are correct.`,
-        false
-      );
-      isSolving = false;
-      window.isSolving = false;
-      solveButton.disabled = false;
-      scrambleButton.disabled = false;
-      return;
-    }
-    
-    console.log("Received solution:", algorithm);
-    
-    if (algorithm === "") {
-      showAlert("Cube Solved", "The cube is already in a solved state!", true);
-      solveButton.disabled = false;
-      scrambleButton.disabled = false;
-      isSolving = false;
-      window.isSolving = false;
-      return;
-    }
-
-    // Proceed with animation...
-    let solution = algorithm.split(" ");
-    let fsolution = [];
-    solution.forEach((move) => {
-      if (move.includes("2")) {
-        fsolution.push(move[0], move[0]);
-      } else {
-        fsolution.push(move);
-      }
-    });
-    
-    // Save current state for scrubbing resets
-    initialHasPainted = true;
-    initialCubeState = scannedState; // 54-char string
-    
-    solutionMoves = fsolution;
-    solutionCurrentStep = 0;
-    
-    showScrubber();
-  });
-}
-
-
-
-function endSequence() {
+  updateButtons();
+  const candidates = [];
+  const undo = undoHistory(state);
+  if (undo) candidates.push(undo);
+  let solverError = null;
+  try {
+    const moves = (await solveFacelets(state)).split(" ").filter(Boolean);
+    if (solves(state, moves)) candidates.push(moves);
+  } catch (error) {
+    solverError = error;
+  }
   isSolving = false;
-  window.isSolving = false;
-  solveButton.disabled = false;
-  scrambleButton.disabled = false;
-  // Clear move history after solving
-  
-  console.log(moveHistory);
-  moveHistory = [];
-  updateMoveHistory(historyDiv,moveHistory);
-}
+  updateButtons();
 
-async function initSolver() {
-  // Load async.js dynamically
-  const asyncScript = document.createElement("script");
-  asyncScript.src = "./src/solver/async.js";
-  document.body.appendChild(asyncScript);
-
-  asyncScript.onload = () => {
-    // console.log('async.js loaded');
-
-    // Fetch worker.js content and create a Blob URL
-    fetch("./src/solver/worker.js")
-      .then((response) => response.text())
-      .then((workerCode) => {
-        const blob = new Blob([workerCode], { type: "application/javascript" });
-        const workerURL = URL.createObjectURL(blob);
-        // console.log("Before:", Cube.moveTables, Cube.pruningTables);
-
-        // console.log("After:", Cube.moveTables, Cube.pruningTables);
-
-        Cube.asyncInit(workerURL, function () {
-          // console.log("solver loaded");
-        });
-      })
-      .catch((error) => console.error("Failed to load worker:", error));
-  };
+  if (!candidates.length) {
+    showAlert("Solver Unavailable", solverError ? solverError.message : "The solver returned a wrong solution. Please try again.");
+    return;
+  }
+  const best = candidates.reduce((a, b) => (b.length < a.length ? b : a));
+  showScrubber(state, best);
 }
 
 function resetCube() {
-  if (isAnimating || isSolving) return;
-  window.hasPainted = false;
-
-  // Clear localStorage saved state!
-  localStorage.removeItem("hasPainted");
-  localStorage.removeItem("savedCubeState");
-  localStorage.removeItem("moveHistory");
+  if (isAnimating || isSolving || isScrambling) return;
+  if (solution.open) {
+    pauseSolution();
+    solution.open = false;
+    scrubberContainer.classList.add("hidden");
+    updateButtons();
+  }
 
   // Reset history
   moveHistory = [];
@@ -1457,6 +1233,7 @@ function resetCube() {
 
   // Recreate the cube from scratch
   createRubiksCube();
+  saveCubeStateToStorage();
 }
 
 function onWindowResize() {
