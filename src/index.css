@@ -703,6 +703,56 @@ button#btn-scramble:disabled {
   background: rgba(0, 0, 0, 0.65);
 }
 
+.scan-mode {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(8, 10, 22, 0.72);
+}
+
+.scan-mode button {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scan-mode button[aria-pressed="true"] {
+  background: var(--accent-color);
+  color: var(--text-primary);
+}
+
+.scan-mode button:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 1px;
+}
+
+.scan-auto-status {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(8, 10, 22, 0.72);
+  color: var(--text-primary);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.scan-auto-status:empty {
+  display: none;
+}
+
 .scan-stage.flash::after {
   content: "";
   position: absolute;

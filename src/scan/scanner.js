@@ -5,6 +5,7 @@
 
 import { classifyStickers, assignBalanced, rgbToLab, labDistance, solveAssignment } from "./colorModel.js";
 import { isSolvable, describeProblems, repairScan, arrangeStickers, facesToString } from "./cubeState.js";
+import { createFaceTracker, looksLikeFace, BACK_COOLDOWN } from "./autoCapture.js";
 
 const U = 0, R = 1, F = 2, D = 3, L = 4, B = 5;
 
@@ -41,6 +42,14 @@ const SAMPLE_INTERVAL = 80; // ms between samples
 const HISTORY = 5; // recent samples combined into one capture
 const LOW_MARGIN = 8; // Lab units; closer calls than this are flagged in the review
 
+const AUTO_STATUS = {
+  search: "Fill the grid with a face",
+  hold: "Hold still…",
+  ready: "Got it. Turn to the next face",
+  turn: "Got it. Turn to the next face",
+  seen: "That face is already scanned",
+};
+
 const NET_POSITION = [[0, 3], [3, 6], [3, 3], [6, 3], [3, 0], [3, 9]]; // [row, col] of each face in the 12x9 net
 const COLOR_NAMES = ["white", "yellow", "red", "orange", "green", "blue"];
 const REFERENCE_LABS = [
@@ -49,6 +58,7 @@ const REFERENCE_LABS = [
 
 let root, video, guide, guideCtx, sampleCtx, stage, message;
 let scanView, stepLabel, instructions, progress, backButton, captureButton, switchButton;
+let manualTab, autoTab, autoStatus;
 let reviewView, net, stickerButtons, statusLine, noteLine, problemList, fixButton, applyButton;
 
 let onApply = null;
@@ -62,6 +72,8 @@ let captures = [];
 let step = 0;
 let returnToReview = false;
 let review = null;
+let autoMode = localStorage.getItem("scanMode") === "auto";
+const tracker = createFaceTracker();
 
 export function openScanner(options) {
   if (!root) buildUI();
@@ -125,7 +137,14 @@ function buildUI() {
   guide = el("canvas", "scan-guide");
   guideCtx = guide.getContext("2d");
   message = el("div", "scan-message");
-  stage.append(video, guide, message);
+  autoStatus = el("div", "scan-auto-status");
+  autoStatus.setAttribute("role", "status");
+  const modeSwitch = el("div", "scan-mode");
+  manualTab = button("", "Manual", () => setMode(false));
+  autoTab = button("", "Auto", () => setMode(true));
+  autoTab.title = "Capture each face by itself when it's held still";
+  modeSwitch.append(manualTab, autoTab);
+  stage.append(video, guide, message, autoStatus, modeSwitch);
   scanView.appendChild(stage);
 
   instructions = el("p", "scan-instructions");
@@ -190,6 +209,7 @@ function buildUI() {
     }
   });
 
+  renderMode();
   document.body.appendChild(root);
 }
 
@@ -219,6 +239,7 @@ async function startCamera(deviceId) {
   stopCamera();
   const request = ++cameraRequest;
   captureButton.disabled = true;
+  autoStatus.textContent = "";
   showMessage("Starting camera…");
 
   if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -273,6 +294,7 @@ async function startCamera(deviceId) {
   switchButton.dataset.current = settings.deviceId || "";
 
   history = [];
+  tracker.reset();
   rafId = requestAnimationFrame(tick);
 }
 
@@ -297,7 +319,33 @@ function tick(now) {
   const samples = sampleGrid();
   history.push(samples);
   if (history.length > HISTORY) history.shift();
-  drawGuide(samples);
+  const status = autoMode ? trackFace(samples) : null;
+  if (status?.state === "ready") capture();
+  else drawGuide(samples, status);
+}
+
+function trackFace(samples) {
+  const { data } = sampleCtx.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
+  // a face being rescanned is allowed to match its old capture
+  const known = captures.filter((c, slot) => c && slot !== STEPS[step].slot);
+  const status = tracker.update(samples, looksLikeFace(data, SAMPLE_SIZE, samples), known);
+  const text = AUTO_STATUS[status.state];
+  if (autoStatus.textContent !== text) autoStatus.textContent = text;
+  return status;
+}
+
+function setMode(auto) {
+  autoMode = auto;
+  localStorage.setItem("scanMode", auto ? "auto" : "manual");
+  tracker.reset();
+  renderMode();
+}
+
+function renderMode() {
+  manualTab.setAttribute("aria-pressed", String(!autoMode));
+  autoTab.setAttribute("aria-pressed", String(autoMode));
+  captureButton.textContent = autoMode ? "Capture now" : "Capture";
+  autoStatus.textContent = "";
 }
 
 function guideRect() {
@@ -341,7 +389,7 @@ function sampleGrid() {
   return samples;
 }
 
-function drawGuide(samples) {
+function drawGuide(samples, status) {
   const { x, y, size } = guideRect();
   const ctx = guideCtx;
   const cell = size / 3;
@@ -373,6 +421,17 @@ function drawGuide(samples) {
     ctx.fill();
     ctx.stroke();
   });
+
+  // Auto mode: the rim fills in while a new face holds still, and turns amber
+  // on a face that's already scanned
+  if (status?.state === "hold" || status?.state === "seen") {
+    ctx.save();
+    ctx.lineWidth = Math.max(4, size / 70);
+    ctx.strokeStyle = status.state === "hold" ? "#34d399" : "#fbbf24";
+    if (status.state === "hold") ctx.setLineDash([4 * size * status.progress, 4 * size]);
+    ctx.strokeRect(x, y, size, size);
+    ctx.restore();
+  }
 }
 
 // ---- Scanning steps -------------------------------------------------------
@@ -427,6 +486,7 @@ function capture() {
   const samples = history[0].map((_, i) => [0, 1, 2].map((ch) => median(history.map((h) => h[i][ch]))));
   captures[STEPS[step].slot] = samples;
   history = [];
+  tracker.captured(samples);
 
   stage.classList.remove("flash");
   void stage.offsetWidth;
@@ -450,6 +510,7 @@ function goBack() {
   if (step === 0) return;
   step--;
   captures[STEPS[step].slot] = null;
+  tracker.reset(BACK_COOLDOWN);
   renderStep();
 }
 

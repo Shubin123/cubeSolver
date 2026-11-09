@@ -18,6 +18,8 @@ Open the menu and press **📷 Scan Cube**. The camera needs the page served ove
 3. Turn back to the first face, tilt the top towards the camera (first face along the bottom edge of the frame), then do the same for the bottom (first face along the top edge).
 4. Check the result. Tap a sticker to change its colour, or tap a centre to rescan that face. **Apply to cube**, then **Solve**.
 
+**Auto mode:** switch the camera view from Manual to Auto and there's nothing to press. Hold each face still in the grid for about half a second and it's captured, then turn to the next one. A face that's already scanned is ignored, so you can pass back over it on the way to the top and bottom. **Capture now** and Space still work if a face isn't picked up, which is most likely with a solid-coloured face on a stickerless cube.
+
 The scanner fixes the usual slips on its own: turning the other way between sides, swapping the top and bottom, holding the top or bottom at an angle, and a single pair of similar colours (red/orange, white/yellow) read the wrong way round.
 
 ### How the scanner reads colours
@@ -38,6 +40,8 @@ It runs in a few milliseconds in the browser, with no model weights to download.
 Five of the 116 states have inconsistent labels (a colour counted 8 or 10 times). The shipped model gets every one of the other 111 states fully right. On random cubes built from the dataset's stickers with per-face drift, 83–99% of scans come out exactly right after the repair step, depending on lighting. 0.4–1.4% come out solvable but wrong, which is what the review screen is for.
 
 `node scratch/test_scan.js` checks the cube-state logic. Pass the path to `cubejs/lib/cube.js` to also cross-check the facelet order against the solver.
+
+**Auto mode** (`src/scan/autoCapture.js`) captures a frame when three things hold: the grid lines up with a cube face (seams or colour changes between the stickers, and even colour inside them), the stickers stay still for about 0.6 s, and the face doesn't match one already scanned at any of its four rotations. The thresholds were tuned on real photos, warped into the guide with random misalignment. It accepted 338 of 420 views of 14 cube faces; most misses are faces photographed at extreme angles and one solid-coloured stickerless face. It accepted 0 of 150 views of a cube mid-turn and 5 of 1,880 views of 47 scenes with no cube. Those photos aren't in this repo. `node scratch/test_auto_capture.js` checks the decisions on drawn frames.
 
 **Other resources looked at:**
 
