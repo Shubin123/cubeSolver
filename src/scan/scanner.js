@@ -18,7 +18,7 @@ const STEPS = [
     slot: F,
     title: "Front",
     text: () => [
-      "Point any face at the camera and fill the grid with it. Keep the same face on top for the next three faces. White on top with red in front matches the colours in the app.",
+      "Point any face at the camera and fill the grid with it. Keep the same face on top for the next three faces.",
     ],
   },
   { slot: R, title: "Side 2", text: () => ["Turn the whole cube a quarter turn so the next side faces the camera. Keep the same face on top."] },
@@ -41,6 +41,7 @@ const SAMPLE_SIZE = 150; // the guide square is downscaled to this many pixels t
 const SAMPLE_INTERVAL = 80; // ms between samples
 const HISTORY = 5; // recent samples combined into one capture
 const LOW_MARGIN = 8; // Lab units; closer calls than this are flagged in the review
+const MAX_GAIN = 1.6; // most a dim scan is brightened when it colours the 3D cube
 
 const AUTO_STATUS = {
   search: "Fill the grid with a face",
@@ -627,7 +628,20 @@ function onStickerClick(i) {
   renderReview();
 }
 
+// The real cube's colour for each face, to paint the 3D cube with: the median
+// of every sticker read as that face, so no one capture's exposure decides
+// it, then brightened together until the lightest reaches full brightness
+function cubeColors() {
+  const rgbs = [0, 1, 2, 3, 4, 5].map((f) => {
+    const stickers = review.rgbs.filter((_, i) => review.faces[i] === f);
+    return [0, 1, 2].map((ch) => median(stickers.map((rgb) => rgb[ch])));
+  });
+  const gain = Math.min(MAX_GAIN, 255 / Math.max(1, ...rgbs.flat()));
+  const names = centerNames().map((name) => name[0].toUpperCase() + name.slice(1));
+  return { rgbs: rgbs.map((rgb) => rgb.map((v) => Math.min(255, Math.round(v * gain)))), names };
+}
+
 function applyScan() {
   if (!review || !isSolvable(review.faces)) return;
-  if (onApply(facesToString(review.faces)) !== false) closeScanner();
+  if (onApply(facesToString(review.faces), cubeColors()) !== false) closeScanner();
 }

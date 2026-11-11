@@ -62,6 +62,18 @@ const DEFAULT_STATE = "FFBFULFLRBBUDRDLRFLFDLFFBRULDBUDBRLLUUUULUFBDRRRBBRDDD";
 // Sticker color and position of each face, in U R F D L B order
 const FACE_COLOR_NAMES = ["White", "Blue", "Red", "Yellow", "Green", "Orange"];
 const FACE_POSITIONS = ["top", "right", "front", "bottom", "left", "back"];
+// Sticker color of each face. Scanning a real cube swaps in its own colors
+// until Reset Colors brings these back.
+const DEFAULT_FACE_COLORS = {
+  U: COLORS.WHITE,
+  R: COLORS.RED,
+  F: COLORS.BLUE,
+  D: COLORS.YELLOW,
+  L: COLORS.ORANGE,
+  B: COLORS.GREEN,
+};
+// Paint buttons in palette order: white, red, blue, orange, green, yellow
+const PAINT_LETTERS = ["U", "F", "R", "B", "L", "D"];
 
 // Cube components
 let cubeGroup; // Holds the entire Rubik's cube
@@ -71,6 +83,8 @@ let isScrambling = false;
 let isAnimating = false; // a face turn is animating or queued
 let cubiePool = [];
 let cubeString = SOLVED_STATE;
+let faceColors = DEFAULT_FACE_COLORS;
+let faceColorNames = FACE_COLOR_NAMES;
 let cubiesContainer;
 let cubeGeneration = 0; // bumped on every rebuild, abandoning turns in flight
 let pendingTurns = 0;
@@ -84,8 +98,13 @@ let scanButton;
 let extraBloomButton;
 let resetButton;
 let rotateButton;
+let resetColorsButton;
 let historyDiv;
 let colorSelect;
+let paintLetter = null; // face color being painted, null in rotate mode
+let paintButtons = [];
+let paintStatusBadge;
+let rotateModeButton;
 
 let alertOverlay;
 let alertTitleElement;
@@ -169,21 +188,12 @@ function applySavedCubeState(stateStr) {
     { name: "L", dir: new THREE.Vector3(-1, 0, 0), getCoords: (i) => ({ gx: 0, gy: 2 - Math.floor(i / 3), gz: i % 3 }) },
     { name: "B", dir: new THREE.Vector3(0, 0, -1), getCoords: (i) => ({ gx: 2 - (i % 3), gy: 2 - Math.floor(i / 3), gz: 0 }) }
   ];
-  
-  const charToColor = {
-    U: COLORS.WHITE,
-    R: COLORS.RED,
-    F: COLORS.BLUE,
-    D: COLORS.YELLOW,
-    L: COLORS.ORANGE,
-    B: COLORS.GREEN
-  };
-  
+
   let charIdx = 0;
   for (const face of faces) {
     for (let i = 0; i < 9; i++) {
       const char = stateStr[charIdx++];
-      const colorHex = charToColor[char] !== undefined ? charToColor[char] : COLORS.BLACK;
+      const colorHex = faceColors[char] !== undefined ? faceColors[char] : COLORS.BLACK;
       
       const { gx, gy, gz } = face.getCoords(i);
       const cubie = getCubieAt(gx, gy, gz);
@@ -198,8 +208,9 @@ function applySavedCubeState(stateStr) {
 }
 
 // A 54-letter facelet string from the camera scanner replaces the cube, the
-// same way a painted cube is stored
-function applyScannedState(stateStr) {
+// same way a painted cube is stored, and the real cube's colors replace the
+// sticker colors
+function applyScannedState(stateStr, scannedColors) {
   if (isSolving || isScrambling) return false;
   if (solution.open) {
     hideScrubber();
@@ -207,9 +218,54 @@ function applyScannedState(stateStr) {
 
   moveHistory = [];
   updateMoveHistory(historyDiv, moveHistory);
+  setFaceColors(scannedPalette(scannedColors.rgbs), scannedColors.names);
   setCubeState(stateStr);
   saveCubeStateToStorage();
   return true;
+}
+
+// Stickers are told apart by their exact color, so each face needs its own
+// hex value, different from the inside of the cube
+function scannedPalette(rgbs) {
+  const used = new Set([COLORS.BLACK]);
+  const colors = {};
+  rgbs.forEach(([r, g, b], f) => {
+    let hex = (r << 16) | (g << 8) | b;
+    while (used.has(hex)) hex = (hex + 1) % 0x1000000;
+    used.add(hex);
+    colors[FACE_LETTERS[f]] = hex;
+  });
+  return colors;
+}
+
+// Repaint the stickers in new colors without touching the cube's state,
+// including cubies in a layer that is mid-turn
+function setFaceColors(colors, names) {
+  const swap = new Map(FACE_LETTERS.split("").map((letter) => [faceColors[letter], colors[letter]]));
+  cubeGroup.traverse((object) => {
+    if (!object.userData.isCubie) return;
+    object.material.forEach((material) => {
+      const hex = swap.get(material.color.getHex());
+      if (hex !== undefined) material.color.set(hex);
+    });
+  });
+  faceColors = colors;
+  faceColorNames = names;
+  if (colors === DEFAULT_FACE_COLORS) localStorage.removeItem("faceColors");
+  else localStorage.setItem("faceColors", JSON.stringify({ colors, names }));
+  updatePaintColors();
+}
+
+function loadFaceColorsFromStorage() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("faceColors"));
+    if (saved && FACE_LETTERS.split("").every((letter) => Number.isInteger(saved.colors[letter])) && saved.names.length === 6) {
+      faceColors = saved.colors;
+      faceColorNames = saved.names;
+    }
+  } catch (e) {
+    // unreadable colors, keep the defaults
+  }
 }
 
 function loadCubeStateFromStorage() {
@@ -357,6 +413,7 @@ function showScrubber(start, moves) {
   scrubberContainer.classList.remove("hidden");
   updateButtons();
   seekToStep(0);
+  onWindowResize();
 }
 
 // Closing keeps whatever step is shown
@@ -370,6 +427,7 @@ function hideScrubber() {
   solution.open = false;
   scrubberContainer.classList.add("hidden");
   updateButtons();
+  onWindowResize();
   saveCubeStateToStorage();
 }
 
@@ -470,6 +528,7 @@ function init() {
   let directionalLights = setupLights();
 
   // Create Rubik's Cube
+  loadFaceColorsFromStorage();
   createRubiksCube();
 
   // Set up UI
@@ -486,6 +545,8 @@ function init() {
   if (window._onResize) window.removeEventListener("resize", window._onResize);
 
   window._onPointerDown = (event) => {
+    // taps on the panels and buttons aren't meant for the cube behind them
+    if (event.target !== renderer.domElement) return;
     onPointerDown(
       event,
       raycaster,
@@ -541,10 +602,16 @@ function init() {
   loadCubeStateFromStorage();
 }
 
+// Twice the pixels per world unit. Small screens zoom out so the cube (about
+// 1.1 units across from any angle) clears the edges and the controls.
+function getCameraScale(width, height) {
+  return Math.min(800, (2 * width) / 1.5, (2 * height) / 1.6);
+}
+
 function setupCamera() {
   let width = window.innerWidth;
   let height = window.innerHeight;
-  let cameraScale = 800;
+  let cameraScale = getCameraScale(width, height);
   // camera = new THREE.PerspectiveCamera(45, aspectRatio, 0.1, 1000);
   camera = new THREE.OrthographicCamera(
     width / -cameraScale,
@@ -751,12 +818,25 @@ function setupUI(dl1, dl2) {
   });
   row2.appendChild(extraBloomButton);
 
+  const row3 = document.createElement("div");
+  row3.className = "btn-row";
+  btnGroup.appendChild(row3);
+
   rotateButton = document.createElement("button");
   rotateButton.textContent = "Auto Rotate";
   rotateButton.addEventListener("click", () => {
     controls.autoRotate = !controls.autoRotate;
   });
-  btnGroup.appendChild(rotateButton);
+  row3.appendChild(rotateButton);
+
+  // shown while the cube wears a scanned cube's colors
+  resetColorsButton = document.createElement("button");
+  resetColorsButton.textContent = "Reset Colors";
+  resetColorsButton.title = "Go back to the app's colors";
+  resetColorsButton.addEventListener("click", () => {
+    setFaceColors(DEFAULT_FACE_COLORS, FACE_COLOR_NAMES);
+  });
+  row3.appendChild(resetColorsButton);
 
   // Move history section
   const historyTitle = document.createElement("div");
@@ -777,12 +857,12 @@ function setupUI(dl1, dl2) {
   const controlsText = document.createElement("div");
   controlsText.className = "controls-info";
   controlsText.innerHTML = `
-        <p>• Click and drag on a face to rotate it</p>
-        <p>• Scan Cube reads a real cube with your camera</p>
+        <p>• Drag on a face to rotate it</p>
+        <p>• Scan Cube reads a real cube and its colors with your camera</p>
         <p>• Select a color to enter Paint Mode</p>
         <p>• Drag background to orbit view</p>
-        <p>• Use mouse wheel to zoom</p>
-        <p>• Shift-click to pan the view</p>
+        <p>• Scroll or pinch to zoom</p>
+        <p>• Shift-drag or two-finger drag to pan the view</p>
     `;
   uiContainer.appendChild(controlsText);
 
@@ -804,59 +884,52 @@ function setupColorPicker() {
   palette.className = "color-palette";
   widget.appendChild(palette);
   
-  const statusBadge = document.createElement("div");
-  statusBadge.className = "status-badge";
-  statusBadge.textContent = "Mode: Rotate";
-  widget.appendChild(statusBadge);
-  
-  const rotateModeBtn = document.createElement("button");
-  rotateModeBtn.className = "btn-rotate-mode active";
-  rotateModeBtn.innerHTML = "🔄 Rotate Mode";
-  widget.appendChild(rotateModeBtn);
-  
-  const colorButtons = [];
-  
-  const validColors = {
-    WHITE: COLORS.WHITE,
-    RED: COLORS.BLUE,
-    BLUE: COLORS.RED,
-    ORANGE: COLORS.GREEN,
-    GREEN: COLORS.ORANGE,
-    YELLOW: COLORS.YELLOW
-  };
-  
-  Object.keys(validColors).forEach((colorName) => {
+  paintStatusBadge = document.createElement("div");
+  paintStatusBadge.className = "status-badge";
+  widget.appendChild(paintStatusBadge);
+
+  rotateModeButton = document.createElement("button");
+  rotateModeButton.className = "btn-rotate-mode";
+  rotateModeButton.innerHTML = '🔄 Rotate<span class="rotate-mode-suffix"> Mode</span>';
+  rotateModeButton.addEventListener("click", () => selectPaint(null));
+  widget.appendChild(rotateModeButton);
+
+  paintButtons = PAINT_LETTERS.map((letter) => {
     const colorBtn = document.createElement("button");
     colorBtn.className = "color-btn";
-    colorBtn.style.color = `#${validColors[colorName].toString(16).padStart(6, '0')}`;
-    colorBtn.style.backgroundColor = `#${validColors[colorName].toString(16).padStart(6, '0')}`;
-    colorBtn.title = `Paint ${colorName}`;
-    
-    colorBtn.addEventListener("click", () => {
-      rotateModeBtn.classList.remove("active");
-      colorButtons.forEach(btn => btn.classList.remove("active"));
-      colorBtn.classList.add("active");
-      
-      colorSelect = [validColors[colorName], colorName];
-      
-      statusBadge.className = "status-badge paint";
-      statusBadge.textContent = `Paint: ${colorName}`;
-    });
-    
+    colorBtn.addEventListener("click", () => selectPaint(letter));
     palette.appendChild(colorBtn);
-    colorButtons.push(colorBtn);
+    return colorBtn;
   });
-  
-  rotateModeBtn.addEventListener("click", () => {
-    rotateModeBtn.classList.add("active");
-    colorButtons.forEach(btn => btn.classList.remove("active"));
-    colorSelect = null;
-    
-    statusBadge.className = "status-badge";
-    statusBadge.textContent = "Mode: Rotate";
-  });
-  
+
   document.body.appendChild(widget);
+  updatePaintColors();
+}
+
+function paintName(letter) {
+  return faceColorNames[FACE_LETTERS.indexOf(letter)].toUpperCase();
+}
+
+// Paint with one face's color, or go back to rotating with null
+function selectPaint(letter) {
+  paintLetter = letter;
+  colorSelect = letter ? [faceColors[letter], paintName(letter)] : null;
+  paintButtons.forEach((btn, i) => btn.classList.toggle("active", PAINT_LETTERS[i] === letter));
+  rotateModeButton.classList.toggle("active", !letter);
+  paintStatusBadge.className = letter ? "status-badge paint" : "status-badge";
+  paintStatusBadge.textContent = letter ? `Paint: ${paintName(letter)}` : "Mode: Rotate";
+}
+
+function updatePaintColors() {
+  paintButtons.forEach((btn, i) => {
+    const letter = PAINT_LETTERS[i];
+    const css = `#${faceColors[letter].toString(16).padStart(6, '0')}`;
+    btn.style.color = css;
+    btn.style.backgroundColor = css;
+    btn.title = `Paint ${paintName(letter)}`;
+  });
+  selectPaint(paintLetter);
+  resetColorsButton.hidden = faceColors === DEFAULT_FACE_COLORS;
 }
 
 function createRubiksCube() {
@@ -932,24 +1005,24 @@ function createCubie(x, y, z) {
 
     // Update materials for each face
     const materials = cubie.material;
-    materials[0].color.set(x === 2 ? COLORS.RED : COLORS.BLACK);
-    materials[1].color.set(x === 0 ? COLORS.ORANGE : COLORS.BLACK);
-    materials[2].color.set(y === 2 ? COLORS.WHITE : COLORS.BLACK);
-    materials[3].color.set(y === 0 ? COLORS.YELLOW : COLORS.BLACK);
-    materials[4].color.set(z === 2 ? COLORS.BLUE : COLORS.BLACK);
-    materials[5].color.set(z === 0 ? COLORS.GREEN : COLORS.BLACK);
+    materials[0].color.set(x === 2 ? faceColors.R : COLORS.BLACK);
+    materials[1].color.set(x === 0 ? faceColors.L : COLORS.BLACK);
+    materials[2].color.set(y === 2 ? faceColors.U : COLORS.BLACK);
+    materials[3].color.set(y === 0 ? faceColors.D : COLORS.BLACK);
+    materials[4].color.set(z === 2 ? faceColors.F : COLORS.BLACK);
+    materials[5].color.set(z === 0 ? faceColors.B : COLORS.BLACK);
   } else {
     // Create new cubie if none available in pool
     const geometry = new THREE.BoxGeometry(CUBIE_SIZE, CUBIE_SIZE, CUBIE_SIZE);
 
     // Get materials for each face
     const materials = [
-      createFaceMaterial(x === 2 ? COLORS.RED : COLORS.BLACK), // Right face (+X)
-      createFaceMaterial(x === 0 ? COLORS.ORANGE : COLORS.BLACK), // Left face (-X)
-      createFaceMaterial(y === 2 ? COLORS.WHITE : COLORS.BLACK), // Top face (+Y)
-      createFaceMaterial(y === 0 ? COLORS.YELLOW : COLORS.BLACK), // Bottom face (-Y)
-      createFaceMaterial(z === 2 ? COLORS.BLUE : COLORS.BLACK), // Front face (+Z)
-      createFaceMaterial(z === 0 ? COLORS.GREEN : COLORS.BLACK), // Back face (-Z)
+      createFaceMaterial(x === 2 ? faceColors.R : COLORS.BLACK), // Right face (+X)
+      createFaceMaterial(x === 0 ? faceColors.L : COLORS.BLACK), // Left face (-X)
+      createFaceMaterial(y === 2 ? faceColors.U : COLORS.BLACK), // Top face (+Y)
+      createFaceMaterial(y === 0 ? faceColors.D : COLORS.BLACK), // Bottom face (-Y)
+      createFaceMaterial(z === 2 ? faceColors.F : COLORS.BLACK), // Front face (+Z)
+      createFaceMaterial(z === 0 ? faceColors.B : COLORS.BLACK), // Back face (-Z)
     ];
 
     cubie = new THREE.Mesh(geometry, materials);
@@ -1051,20 +1124,11 @@ function getFaceletColor(cubie, worldDirection) {
 }
 
 function matchColorToLetter(color) {
-  const matchColors = {
-    "U": COLORS.WHITE,
-    "R": COLORS.RED,
-    "F": COLORS.BLUE,
-    "D": COLORS.YELLOW,
-    "L": COLORS.ORANGE,
-    "B": COLORS.GREEN
-  };
-  
   let bestMatch = null;
   let minDiff = Infinity;
   const tempColor = new THREE.Color();
   
-  for (const [letter, val] of Object.entries(matchColors)) {
+  for (const [letter, val] of Object.entries(faceColors)) {
     tempColor.set(val);
     const diff = Math.pow(color.r - tempColor.r, 2) +
                  Math.pow(color.g - tempColor.g, 2) +
@@ -1156,12 +1220,12 @@ function getCubeStateString() {
 function findStateProblem(state) {
   for (let f = 0; f < 6; f++) {
     if (state[9 * f + 4] !== FACE_LETTERS[f]) {
-      return `The ${FACE_POSITIONS[f]} center is painted ${FACE_COLOR_NAMES[FACE_LETTERS.indexOf(state[9 * f + 4])].toLowerCase()}. Centers can't move on a real cube, so it has to stay ${FACE_COLOR_NAMES[f].toLowerCase()}.`;
+      return `The ${FACE_POSITIONS[f]} center is painted ${faceColorNames[FACE_LETTERS.indexOf(state[9 * f + 4])].toLowerCase()}. Centers can't move on a real cube, so it has to stay ${faceColorNames[f].toLowerCase()}.`;
     }
   }
   const faces = [...state].map((letter) => FACE_LETTERS.indexOf(letter));
   if (isSolvable(faces)) return null;
-  const problems = describeProblems(faces, FACE_COLOR_NAMES).map((p) => `• ${p.message}`);
+  const problems = describeProblems(faces, faceColorNames).map((p) => `• ${p.message}`);
   return `No real cube has these colors:\n\n${problems.join("\n")}\n\nRepaint those stickers or scan the cube again.`;
 }
 
@@ -1222,6 +1286,7 @@ function resetCube() {
     solution.open = false;
     scrubberContainer.classList.add("hidden");
     updateButtons();
+    onWindowResize();
   }
 
   // Reset history
@@ -1236,10 +1301,13 @@ function resetCube() {
   saveCubeStateToStorage();
 }
 
+// Also called when the solution bar opens or closes: while it's open the cube
+// is fitted into the space above it
 function onWindowResize() {
   const width = window.innerWidth;
   const height = window.innerHeight;
-  const cameraScale = 800;
+  const free = solution.open ? scrubberContainer.offsetTop : height;
+  const cameraScale = getCameraScale(width, free);
 
   const aspectRatio = width / height;
 
@@ -1253,8 +1321,8 @@ function onWindowResize() {
 
   camera.left = width / -cameraScale;
   camera.right = width / cameraScale;
-  camera.top = height / cameraScale;
-  camera.bottom = height / -cameraScale;
+  camera.top = free / cameraScale;
+  camera.bottom = (free - 2 * height) / cameraScale;
   camera.updateProjectionMatrix();
 
   // camera.right = 1/aspectRatio;
