@@ -685,7 +685,7 @@ button#btn-scramble:disabled {
 
 /* video and guide share object-fit so the grid stays over the same pixels */
 .scan-stage video,
-.scan-stage canvas {
+.scan-guide {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -693,9 +693,21 @@ button#btn-scramble:disabled {
   object-fit: contain;
 }
 
+/* the little cube is mirrored too, so it turns the way the video does */
 .scan-stage.mirrored video,
 .scan-stage.mirrored canvas {
   transform: scaleX(-1);
+}
+
+.scan-cube {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: clamp(76px, 22%, 150px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(8, 10, 22, 0.55) 30%, rgba(8, 10, 22, 0) 70%);
+  pointer-events: none;
 }
 
 .scan-message {
@@ -957,8 +969,12 @@ button#btn-scramble:disabled {
   }
 }
 
-/* Short screens (phones held sideways): a slimmer paint tool and solution bar */
+/* Short screens (phones held sideways): a slimmer paint tool, solution bar and scan cube */
 @media (max-height: 500px) {
+  .scan-cube {
+    width: 84px;
+  }
+
   .color-picker-widget {
     top: 12px;
     right: 12px;

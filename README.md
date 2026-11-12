@@ -18,6 +18,8 @@ Open the menu and press **📷 Scan Cube**. The camera needs the page served ove
 3. Turn back to the first face, tilt the top towards the camera (first face along the bottom edge of the frame), then do the same for the bottom (first face along the top edge).
 4. Check the result. Tap a sticker to change its colour, or tap a centre to rescan that face. **Apply to cube**, then **Solve**.
 
+The little cube in the corner of the camera view turns to show which face to hold up next, the way the camera should see it, and colours each face in as it's captured.
+
 **Apply to cube** also repaints the 3D cube in your cube's own colours, as the camera saw them, so it looks like the cube in your hand whichever way round you held it. The colours are kept until **Reset Colors** in the menu brings back the app's colours. Resetting doesn't change the cube's state.
 
 **Auto mode:** switch the camera view from Manual to Auto and there's nothing to press. Hold each face still in the grid for about half a second and it's captured, then turn to the next one. A face that's already scanned is ignored, so you can pass back over it on the way to the top and bottom. **Capture now** and Space still work if a face isn't picked up, which is most likely with a solid-coloured face on a stickerless cube.

@@ -6,6 +6,7 @@
 import { classifyStickers, assignBalanced, rgbToLab, labDistance, solveAssignment } from "./colorModel.js";
 import { isSolvable, describeProblems, repairScan, arrangeStickers, facesToString } from "./cubeState.js";
 import { createFaceTracker, looksLikeFace, BACK_COOLDOWN } from "./autoCapture.js";
+import { createScanCube } from "./scanCube.js";
 
 const U = 0, R = 1, F = 2, D = 3, L = 4, B = 5;
 
@@ -42,6 +43,7 @@ const SAMPLE_INTERVAL = 80; // ms between samples
 const HISTORY = 5; // recent samples combined into one capture
 const LOW_MARGIN = 8; // Lab units; closer calls than this are flagged in the review
 const MAX_GAIN = 1.6; // most a dim scan is brightened when it colours the 3D cube
+const FINISH_DELAY = 900; // ms the camera view stays up after the last face, to see it colour in
 
 const AUTO_STATUS = {
   search: "Fill the grid with a face",
@@ -57,7 +59,7 @@ const REFERENCE_LABS = [
   [235, 235, 235], [250, 215, 40], [190, 30, 45], [250, 110, 20], [20, 160, 80], [20, 80, 190],
 ].map((rgb) => rgbToLab(...rgb));
 
-let root, video, guide, guideCtx, sampleCtx, stage, message;
+let root, video, guide, guideCtx, sampleCtx, stage, message, scanCube;
 let scanView, stepLabel, instructions, progress, backButton, captureButton, switchButton;
 let manualTab, autoTab, autoStatus;
 let reviewView, net, stickerButtons, statusLine, noteLine, problemList, fixButton, applyButton;
@@ -67,6 +69,7 @@ let stream = null;
 let cameraRequest = 0;
 let cameraIds = [];
 let rafId = 0;
+let finishTimer = 0;
 let lastSample = 0;
 let history = [];
 let captures = [];
@@ -88,7 +91,9 @@ export function openScanner(options) {
 }
 
 function closeScanner() {
+  clearTimeout(finishTimer);
   stopCamera();
+  scanCube.stop();
   root.classList.remove("show");
 }
 
@@ -137,6 +142,10 @@ function buildUI() {
   video.setAttribute("playsinline", "");
   guide = el("canvas", "scan-guide");
   guideCtx = guide.getContext("2d");
+  // shows which face to hold up next and colours each one in once it's scanned
+  const cubeCanvas = el("canvas", "scan-cube");
+  cubeCanvas.setAttribute("aria-hidden", "true");
+  scanCube = createScanCube(cubeCanvas);
   message = el("div", "scan-message");
   autoStatus = el("div", "scan-auto-status");
   autoStatus.setAttribute("role", "status");
@@ -145,7 +154,7 @@ function buildUI() {
   autoTab = button("", "Auto", () => setMode(true));
   autoTab.title = "Capture each face by itself when it's held still";
   modeSwitch.append(manualTab, autoTab);
-  stage.append(video, guide, message, autoStatus, modeSwitch);
+  stage.append(video, guide, cubeCanvas, message, autoStatus, modeSwitch);
   scanView.appendChild(stage);
 
   instructions = el("p", "scan-instructions");
@@ -454,7 +463,9 @@ function showScanView() {
   review = null;
   reviewView.classList.add("hidden");
   scanView.classList.remove("hidden");
+  scanView.inert = false;
   renderStep();
+  scanCube.start();
   startCamera();
 }
 
@@ -464,6 +475,7 @@ function renderStep() {
   instructions.replaceChildren(...current.text(chip));
   backButton.textContent = returnToReview ? "Back to review" : "Back";
   backButton.disabled = !returnToReview && step === 0;
+  scanCube.show(captures, current.slot);
 
   progress.replaceChildren(
     ...STEPS.map((s, index) => {
@@ -488,14 +500,20 @@ function capture() {
   captures[STEPS[step].slot] = samples;
   history = [];
   tracker.captured(samples);
+  scanCube.colorIn(STEPS[step].slot, samples);
 
   stage.classList.remove("flash");
   void stage.offsetWidth;
   stage.classList.add("flash");
 
   if (returnToReview || captures.every(Boolean)) {
+    // stop reading frames but leave the camera view up for a moment, so the
+    // last face can be seen colouring in on the little cube
+    renderStep();
     returnToReview = false;
-    showReview();
+    cancelAnimationFrame(rafId);
+    scanView.inert = true;
+    finishTimer = setTimeout(showReview, FINISH_DELAY);
     return;
   }
   step = STEPS.findIndex((s) => !captures[s.slot]);
@@ -519,6 +537,7 @@ function goBack() {
 
 function showReview() {
   stopCamera();
+  scanCube.stop();
   scanView.classList.add("hidden");
   reviewView.classList.remove("hidden");
   stepLabel.textContent = "Check the scan";
